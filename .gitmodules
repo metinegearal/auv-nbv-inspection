@@ -1,0 +1,3 @@
+[submodule "src/perception/perception/BGNet"]
+	path = src/perception/perception/BGNet
+	url = https://github.com/3DCVdeveloper/BGNet.git
