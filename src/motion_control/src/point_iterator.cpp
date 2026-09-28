@@ -15,10 +15,12 @@ public:
         // Initial setup
         camera_position_ = {0.35, 0.1125 + 0.275, -0.5}; // x, y, z
         waypoints_.push_back({-16.0, -81.0, -30.0, 0.0});
+        // waypoints_.push_back({-56.0, -100.0, -30.0, 3.14});
 
         // Publishers
         waypoint_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("/trajectory/waypoint", 10);
         planner_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/report", 10);
+        request_nbv_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/request_nbv", 10);
 
         // Subscribers
         stop_sub_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
@@ -41,6 +43,7 @@ private:
 
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr waypoint_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr planner_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr request_nbv_pub_;
     
     rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr stop_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr point_sub_;
@@ -92,11 +95,11 @@ private:
             msg.layout.dim[1].stride = 4;
             
             for (const auto& wp : waypoints_) {
-                float x = 0.0f, y = 0.0f, z = -30.0f, yaw = 0.0f;
+                float x = 0.0f, y = 0.0f, z = -29.5f, yaw = 0.0f;
                 
                 // Safely pad every waypoint to exactly 4 floats to prevent numpy crashes
                 if (wp.size() >= 2) { x = wp[0]; y = wp[1]; }
-                // if (wp.size() >= 3) { z = wp[2]; }
+                if (wp.size() >= 3) { z = wp[2]; }
                 if (wp.size() >= 4) { yaw = wp[3]; }
                 
                 msg.data.insert(msg.data.end(), {x, y, z, yaw});
@@ -143,6 +146,14 @@ private:
 
         // Trigger the publisher manually
         timer_callback();
+
+        // NEW: If the queue just hit zero, instantly demand more waypoints!
+        if (waypoints_.empty()) {
+            RCLCPP_INFO(this->get_logger(), "Waypoint queue empty. Demanding new NBV trajectory NOW!");
+            auto req_msg = std_msgs::msg::Bool();
+            req_msg.data = true;
+            request_nbv_pub_->publish(req_msg);
+        }
     }
 };
 

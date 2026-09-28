@@ -70,8 +70,11 @@ class BenchmarkLogger(Node):
         ))
 
     def finish_callback(self, msg):
-        if msg.data and not self.mission_finished and self.mission_started:
+        if msg.data and not self.mission_finished:
             self.mission_finished = True
+            if self.start_time == 0.0:
+                self.start_time = time.time() # Handle immediate aborts
+                
             self.end_time = time.time()
             total_time = self.end_time - self.start_time
             
@@ -81,7 +84,8 @@ class BenchmarkLogger(Node):
     def save_benchmark_data(self, total_time):
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         csv_filename = f"trajectory_benchmark_{timestamp_str}.csv"
-        txt_filename = f"mission_stats_{timestamp_str}.txt"
+        # txt_filename = f"mission_stats_{timestamp_str}.txt"
+        txt_filename = "optuna_mission_stats.txt"
         
         # 1. Save Trajectory CSV
         with open(csv_filename, 'w', newline='') as f:
