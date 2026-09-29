@@ -25,17 +25,22 @@ ros2 run benchmark_evaluator plot_benchmark_results --results-dir results
 ## Files
 
 - `benchmark_trajectory.csv`: measured vehicle trajectory sampled by the benchmark logger.
-- `benchmark_depth_poses.csv`, `benchmark_nbv_iterations.jsonl`, and `benchmark_future_trajectories.csv`: initialized benchmark-prefix telemetry files; the populated mid-run planner records use the corresponding `planner_*` files below.
 - `trajectory_benchmark_<timestamp>.csv`: legacy copy of the measured trajectory.
-- `planner_trajectory.csv`: reserved planner telemetry trajectory file; the main measured path is `benchmark_trajectory.csv`.
+- `planner_trajectory.csv`: planner-prefix trajectory file; the main measured path is `benchmark_trajectory.csv`.
 - `planner_nbv_iterations.jsonl`: one JSON record per planning iteration. It includes iteration timing, whether a route was published, whether the previous route was blocked, and every candidate's cluster, position, target, utility, raw gain, raw cost, and `trajectory_id`.
 - `planner_future_trajectories.csv`: every waypoint of every future trajectory published by the planner, grouped by `iteration`.
 - `planner_depth_poses.csv`: vehicle position and roll, pitch, and yaw matched to each depth frame.
+- `perception_pipeline_timing.csv`: per synchronized frame timings for image conversion, BGNet preprocessing, inference, postprocessing, depth publish, and total callback time.
+- `planner_pipeline_timing.csv`: per-cycle timings for depth-to-OctoMap, OctoMap extraction, collision inflation, map save, NBV generation, route search, trajectory validation, trajectory publish, and total cycle time.
 - `evaluation_parameters.txt`: planner processing time and OctoMap leaf count for each planning cycle.
 - `optuna_mission_stats.txt`: final mission time, distance, average speed, and trajectory sample count.
 - `final_map_ros2.bt`: final OctoMap, when the planner uses its default map path.
 
-The generic telemetry CSV and JSONL files are reset when a new logger node starts. Timestamped legacy benchmark CSV files are retained.
+The benchmark logger creates only `benchmark_trajectory.csv`; the planner creates the `planner_*` mid-run files, and perception creates `perception_pipeline_timing.csv`. Generic telemetry files are reset when their logger node starts. Timestamped legacy benchmark CSV files are retained.
+
+## Measuring performance
+
+Use the `duration_ms` column to calculate mean, median, and percentile latency. For the actual depth model latency, filter `perception_pipeline_timing.csv` to `stage=inference_ms`. The default synchronizer uses `sync_queue_size: 1`, which drops older image pairs while BGNet is busy. `sync_slop_s` controls the maximum timestamp difference accepted between the two cameras.
 
 ## Changing the camera cone shape
 

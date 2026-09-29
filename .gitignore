@@ -2,3 +2,5 @@ build/
 install/
 log/
 *.pth
+results/*.csv
+PR_**.md

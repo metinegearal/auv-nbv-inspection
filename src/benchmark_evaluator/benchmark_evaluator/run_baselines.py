@@ -21,7 +21,8 @@ class BenchmarkLogger(Node):
         self.total_distance = 0.0
         self.results_dir = self.declare_parameter(
             'results_dir', 'results').value
-        self.telemetry = MidrunLogger(self.results_dir)
+        self.telemetry = MidrunLogger(
+            self.results_dir, trajectory_only=True)
         
         self.current_x = 0.0
         self.current_y = 0.0

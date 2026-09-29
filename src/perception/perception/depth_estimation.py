@@ -1,13 +1,16 @@
 from .compute_depth import compute_stereo_depth
+from .compute_depth import get_last_depth_timings
 from std_msgs.msg import Float32, Header, Float32MultiArray
 import rclpy
 from rclpy.node import Node
+import time
 
 from sensor_msgs.msg import Image
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
+from benchmark_evaluator.midrun_logger import MidrunLogger
 
 # NEW: Import message_filters for stereo synchronization
 import message_filters
@@ -17,6 +20,16 @@ class obstacleAvoidance(Node):
         super().__init__('object_detector_node')
 
         self.bridge = CvBridge()
+        self.declare_parameter('sync_queue_size', 1)
+        self.declare_parameter('sync_slop_s', 0.02)
+        self.declare_parameter('results_dir', 'results')
+        sync_queue_size = int(self.get_parameter('sync_queue_size').value)
+        sync_slop_s = float(self.get_parameter('sync_slop_s').value)
+        self.frame_id = 0
+        self.telemetry = MidrunLogger(
+            self.get_parameter('results_dir').value,
+            prefix='perception',
+            pipeline_only=True)
 
         # Optimize QoS to ONLY keep the absolute newest frame (queue size 1)
         # This prevents the node from getting "stuck" processing old backlog frames
@@ -33,11 +46,11 @@ class obstacleAvoidance(Node):
             self, Image, 'holocean/cameraDown/image_raw', qos_profile=qos)
 
         # 2. Synchronize the two image streams based on their timestamps.
-        # queue_size=2 keeps memory low, slop=0.05 allows 50ms of timestamp jitter.
+        # Keep only the newest pair while the model is processing the previous one.
         self.ts = message_filters.ApproximateTimeSynchronizer(
             [self.sub_cam_left, self.sub_cam_right], 
-            queue_size=10, 
-            slop=0.02  # 20ms tolerance prevents ghosting but allows sim jitter
+            queue_size=sync_queue_size,
+            slop=sync_slop_s
         )
         self.ts.registerCallback(self.sync_cam_callback)
 
@@ -47,20 +60,46 @@ class obstacleAvoidance(Node):
 
     def sync_cam_callback(self, msg_left, msg_right):
         # This callback ONLY fires when a perfectly matched pair of images arrives
+        callback_started = time.perf_counter()
+        self.frame_id += 1
+        frame_id = self.frame_id
+        source_stamp_s = (
+            msg_left.header.stamp.sec
+            + msg_left.header.stamp.nanosec * 1e-9)
         
         # Convert Left Image
+        conversion_started = time.perf_counter()
         frame_left = self.bridge.imgmsg_to_cv2(msg_left, desired_encoding='bgr8')
         frame_left = cv2.cvtColor(frame_left, cv2.COLOR_BGR2RGB)
         
         # Convert Right (Secondary) Image
         frame_right = self.bridge.imgmsg_to_cv2(msg_right, desired_encoding='bgr8')
         frame_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2RGB)
+        conversion_ms = (time.perf_counter() - conversion_started) * 1000.0
 
         # Compute Depth
         depth = compute_stereo_depth(frame_right, frame_left, focal_length_px=256, baseline_meters=0.5)
+        depth_timings = get_last_depth_timings()
+        for stage, duration_ms in depth_timings.items():
+            if stage.endswith('_ms'):
+                self.telemetry.record_stage(
+                    stage, duration_ms, frame_id=frame_id,
+                    source_stamp_s=source_stamp_s)
         
         # Publish using the exact timestamp of the left image to prevent temporal smearing downstream
+        publish_started = time.perf_counter()
         self._publish_depth(depth, msg_left.header.stamp)
+        publish_ms = (time.perf_counter() - publish_started) * 1000.0
+        total_ms = (time.perf_counter() - callback_started) * 1000.0
+        self.telemetry.record_stage(
+            'image_conversion', conversion_ms, frame_id=frame_id,
+            source_stamp_s=source_stamp_s)
+        self.telemetry.record_stage(
+            'depth_publish', publish_ms, frame_id=frame_id,
+            source_stamp_s=source_stamp_s)
+        self.telemetry.record_stage(
+            'depth_callback_total', total_ms, frame_id=frame_id,
+            source_stamp_s=source_stamp_s)
 
     def _publish_depth(self, depth_data, original_stamp):
         try:

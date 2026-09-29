@@ -12,9 +12,32 @@ class PathPlanner : public rclcpp::Node
 public:
     PathPlanner() : Node("path_planner")
     {
+        this->declare_parameter<double>("camera_x", 0.35);
+        this->declare_parameter<double>("camera_y", 0.1125 + 0.275);
+        this->declare_parameter<double>("camera_z", -0.5);
+        this->declare_parameter<double>("initial_waypoint_x", -16.0);
+        this->declare_parameter<double>("initial_waypoint_y", -81.0);
+        this->declare_parameter<double>("initial_waypoint_z", -30.0);
+        this->declare_parameter<double>("initial_waypoint_yaw", 0.0);
+        this->declare_parameter<double>("timer_period_s", 1.0);
+        this->declare_parameter<double>("waypoint_reached_distance", 0.4);
+
+        this->get_parameter("camera_x", camera_position_x_);
+        this->get_parameter("camera_y", camera_position_y_);
+        this->get_parameter("camera_z", camera_position_z_);
+        this->get_parameter("initial_waypoint_x", initial_waypoint_x_);
+        this->get_parameter("initial_waypoint_y", initial_waypoint_y_);
+        this->get_parameter("initial_waypoint_z", initial_waypoint_z_);
+        this->get_parameter("initial_waypoint_yaw", initial_waypoint_yaw_);
+        this->get_parameter("timer_period_s", timer_period_s_);
+        this->get_parameter(
+            "waypoint_reached_distance", waypoint_reached_distance_);
+
         // Initial setup
-        camera_position_ = {0.35, 0.1125 + 0.275, -0.5}; // x, y, z
-        waypoints_.push_back({-16.0, -81.0, -30.0, 0.0});
+        camera_position_ = {camera_position_x_, camera_position_y_, camera_position_z_};
+        waypoints_.push_back({
+            initial_waypoint_x_, initial_waypoint_y_,
+            initial_waypoint_z_, initial_waypoint_yaw_});
         // waypoints_.push_back({-56.0, -100.0, -30.0, 3.14});
 
         // Publishers
@@ -32,7 +55,9 @@ public:
 
         // Timer
         timer_ = this->create_wall_timer(
-            std::chrono::seconds(1), std::bind(&PathPlanner::timer_callback, this));
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::duration<double>(timer_period_s_)),
+            std::bind(&PathPlanner::timer_callback, this));
 
         RCLCPP_INFO(this->get_logger(), "✅ Path planner Started");
     }
@@ -40,6 +65,15 @@ public:
 private:
     std::vector<double> camera_position_;
     std::vector<std::vector<double>> waypoints_;
+    double camera_position_x_ = 0.35;
+    double camera_position_y_ = 0.1125 + 0.275;
+    double camera_position_z_ = -0.5;
+    double initial_waypoint_x_ = -16.0;
+    double initial_waypoint_y_ = -81.0;
+    double initial_waypoint_z_ = -30.0;
+    double initial_waypoint_yaw_ = 0.0;
+    double timer_period_s_ = 1.0;
+    double waypoint_reached_distance_ = 0.4;
 
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr waypoint_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr planner_pub_;
@@ -120,7 +154,7 @@ private:
             // Replaces python Tools.mapping2D.diff
             double dist = std::hypot(waypoints_[0][0] - data[0], waypoints_[0][1] - data[1]);
             
-            if (dist < 1.0) {
+            if (dist < waypoint_reached_distance_) {
                 waypoints_.erase(waypoints_.begin());
             }
         }
