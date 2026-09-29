@@ -51,6 +51,8 @@ class NBVUtilityNode(Node):
         self.visit_radius = self.declare_parameter('visit_radius', 0.25).value
         self.results_dir = self.declare_parameter(
             'results_dir', 'results').value
+        self.use_incremental_map_cache = self.declare_parameter(
+            'use_incremental_map_cache', True).value
 
         self.bridge = CvBridge()
         self.position = np.zeros(3, dtype=np.float64)
@@ -79,8 +81,12 @@ class NBVUtilityNode(Node):
         self.force_replan = False
         self.visited_targets = []
         self.selected_targets = []
+        self.occupied_voxels = set()
+        self.pending_occupied_voxels = set()
+        self.collision_voxels = set()
         self.telemetry = MidrunLogger(self.results_dir, prefix='planner')
         self.failed_plan_count = 0
+        self.observation_history = []
 
         qos = rclpy.qos.QoSProfile(depth=10)
         qos.reliability = rclpy.qos.QoSReliabilityPolicy.BEST_EFFORT
@@ -93,7 +99,7 @@ class NBVUtilityNode(Node):
         self.create_subscription(
             MagneticField, 'holocean/mag', self.mag_callback, qos)
         self.create_subscription(
-            Bool, '/planner/request_nbv', self.request_nbv_callback, 10)
+            Bool, '/planner/request_nbv', self.request_nbv_callback, 1)
 
         self.waypoint_pub = self.create_publisher(
             Float32MultiArray, 'object/areaWaypoints', 10)
@@ -239,6 +245,14 @@ class NBVUtilityNode(Node):
             # Randomly sample exactly 4000 points to preserve the pipe's overall shape
             indices = np.random.choice(len(points), 4000, replace=False)
             points = points[indices]
+
+        if self.use_incremental_map_cache:
+            voxel_indices = np.floor(
+                points / self.resolution).astype(np.int32)
+            new_voxels = set(map(tuple, voxel_indices.tolist()))
+            new_voxels.difference_update(self.occupied_voxels)
+            self.occupied_voxels.update(new_voxels)
+            self.pending_occupied_voxels.update(new_voxels)
             
         sensor_origin = self.position + self.camera_offset
         self.octree.insertPointCloud(
@@ -248,10 +262,34 @@ class NBVUtilityNode(Node):
         )
         self.get_logger().info(f'Inserted {len(points)} points into OctoTree.', throttle_duration_sec=1.0)
 
+        save_obs = True
+        if self.observation_history:
+            last_pos, last_yaw = self.observation_history[-1]
+            dist = np.linalg.norm(self.latched_position - last_pos)
+            
+            # Normalize yaw difference
+            yaw_diff = abs(math.atan2(
+                math.sin(self.latched_yaw - last_yaw), 
+                math.cos(self.latched_yaw - last_yaw)
+            ))
+            
+            # Only save if we moved 0.5m or turned 15 degrees to save memory
+            if dist < 0.5 and yaw_diff < math.radians(15):
+                save_obs = False
+                
+        if save_obs:
+            self.observation_history.append((np.copy(self.latched_position), self.latched_yaw))
     
 
     def _occupied_points(self):
         """Extract occupied metric points from the persistent OctoMap."""
+        if self.use_incremental_map_cache:
+            if not self.occupied_voxels:
+                return np.empty((0, 3), dtype=np.float64)
+            return (
+                (np.asarray(tuple(self.occupied_voxels), dtype=np.float64) + 0.5)
+                * self.resolution)
+
         extracted = self.octree.extractPointCloud()
         points = np.asarray(extracted[0], dtype=np.float64)
         if points.size == 0:
@@ -346,9 +384,7 @@ class NBVUtilityNode(Node):
             details='published' if success else 'rejected')
         if success:
             self.selected_targets = [np.copy(target) for target in targets]
-            # Add the successfully routed targets to our spatial memory
-            for target in targets:
-                self.visited_targets.append(target)
+            # DELETED: We no longer add targets to memory here!
         return success
 
     def _active_trajectory_is_safe(self, occupied):
@@ -394,10 +430,21 @@ class NBVUtilityNode(Node):
         self.get_logger().info(f'Iteration {self.iteration}: OctoMap total size = {len(occupied_points)} voxels.', throttle_duration_sec=2.0)
         
         stage_started = time.perf_counter()
-        occupied_indices = set(map(
-            tuple, np.floor(occupied_points / self.resolution).astype(int)))
-        collision_voxels = inflate_occupied(
-            occupied_indices, self.collision_radius, self.resolution)
+        if self.use_incremental_map_cache:
+            new_voxels = self.pending_occupied_voxels
+            self.pending_occupied_voxels = set()
+            if new_voxels:
+                self.collision_voxels.update(
+                    inflate_occupied(
+                        new_voxels,
+                        self.collision_radius,
+                        self.resolution))
+            collision_voxels = self.collision_voxels
+        else:
+            occupied_indices = set(map(
+                tuple, np.floor(occupied_points / self.resolution).astype(int)))
+            collision_voxels = inflate_occupied(
+                occupied_indices, self.collision_radius, self.resolution)
         self.telemetry.record_stage(
             'collision_inflation', (time.perf_counter() - stage_started) * 1000.0,
             iteration=self.iteration, frame_id=self.depth_sequence)
@@ -433,8 +480,7 @@ class NBVUtilityNode(Node):
                     occupied_points,
                     self.position + self.camera_offset,
                     heading,
-                    self.visited_targets,  # <-- NEW
-                    self.visit_radius
+                    self.observation_history
                 )
                 self.get_logger().info(f'Found {len(candidates)} valid NBV targets.')
             except (ValueError, RuntimeError) as error:

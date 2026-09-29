@@ -204,6 +204,10 @@ private:
         if (msg->data.size() >= 3) {
             waypoint_ = {msg->data[0], msg->data[1], msg->data[2]};
             if (msg->data.size() >= 4) fixed_angle_ = msg->data[3];
+            RCLCPP_INFO(this->get_logger(), "Received new waypoint: [%.2f, %.2f, %.2f]", waypoint_[0], waypoint_[1], waypoint_[2]);
+            if (fixed_angle_.has_value()) {
+                RCLCPP_INFO(this->get_logger(), "Fixed angle: [%.2f]", fixed_angle_.value());
+            }
             move_towards_waypoint(waypoint_);
         }
     }
@@ -216,6 +220,8 @@ private:
       for (size_t i = 0; i < 3; ++i) target[i] += dvl_reset_position_.value()[i];
     }
     if (target[2] < 0) current_position_[2] = current_depth_;
+
+    RCLCPP_INFO(this->get_logger(), "From current position: [%.2f, %.2f, %.2f] moving towards waypoint: [%.2f, %.2f, %.2f]", current_position_[0], current_position_[1], current_position_[2], target[0], target[1], target[2]);
 
     std::vector<double> direction(3);
     for (size_t i = 0; i < 3; ++i) direction[i] = target[i] - current_position_[i];

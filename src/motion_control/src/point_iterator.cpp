@@ -43,7 +43,7 @@ public:
         // Publishers
         waypoint_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("/trajectory/waypoint", 10);
         planner_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/report", 10);
-        request_nbv_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/request_nbv", 10);
+        request_nbv_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/request_nbv", 1);
 
         // Subscribers
         stop_sub_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(

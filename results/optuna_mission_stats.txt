@@ -1,5 +1,5 @@
 === AUV Exploration Benchmark ===
-Total Mission Time (Makespan): 22.10 seconds
-Total Distance Traveled: 7.83 meters
-Average Flight Speed: 0.354 m/s
-Total Trajectory Waypoints Logged: 45
+Total Mission Time (Makespan): 221.38 seconds
+Total Distance Traveled: 45.80 meters
+Average Flight Speed: 0.207 m/s
+Total Trajectory Waypoints Logged: 443

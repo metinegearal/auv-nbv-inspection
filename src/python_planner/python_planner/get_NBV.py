@@ -1,6 +1,10 @@
 import numpy as np
 import open3d as o3d
+from rclpy.logging import get_logger
 from scipy.spatial import KDTree
+
+
+LOGGER = get_logger('nbv_waypoint_calculator')
 
 # ==========================================
 # NBV MATHEMATICAL HELPER FUNCTIONS
@@ -197,11 +201,12 @@ def normalize_array(arr):
 # ==========================================
 # MAIN NBV PIPELINE FUNCTION
 # ==========================================
-def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, visited_targets, visit_radius):
+def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, observation_history=[]):
     """
     Takes raw OctoMap occupied points and returns a sorted list of the best 
     Next-Best-View (NBV) waypoints for the AUV trajectory planner.
     """
+    LOGGER.info('Calculating NBV waypoints...')
     points_raw = np.asarray(occupied_points)
     if len(points_raw) == 0:
         return []
@@ -214,9 +219,8 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, visited_
         
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pipe_points)
-    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=15, std_ratio=1.5)
-
     pcd = pcd.voxel_down_sample(voxel_size=0.25)
+    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=15, std_ratio=1.5)
     
     if len(pcd.points) < 40:
         return []
@@ -239,32 +243,61 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, visited_
 
     # 3. Candidate Generation & Raw Evaluation
     all_candidates = []
-    MIN_RAW_GAIN = 2.0 
+    MIN_RAW_GAIN = 0.5  # Lowered threshold to prevent throwing away valid targets
     
     for cluster in clusters:
-        
-        # SPATIAL MEMORY CHECK: Is this cluster too close to an old target?
         already_visited = False
-        for vt in visited_targets:
-            # If the distance between the cluster and an old target is less than the radius, skip it!
-            if np.linalg.norm(cluster['centroid'] - vt) < visit_radius:
-                already_visited = True
-                break
+        for obs_pos, obs_yaw in observation_history:
+            vec = cluster['centroid'] - obs_pos
+            dist = np.linalg.norm(vec)
+            
+            # 1. Was it within the camera's physical range?
+            if 0.1 < dist < 3.0:
+                # 2. Was the AUV physically facing it?
+                angle_to_target = np.arctan2(vec[1], vec[0])
+                
+                # Normalize the angle difference
+                yaw_diff = np.abs(np.arctan2(
+                    np.sin(angle_to_target - obs_yaw), 
+                    np.cos(angle_to_target - obs_yaw)
+                ))
+                
+                if yaw_diff < np.radians(30):
+                    LOGGER.info(
+                        f"Cluster {cluster['id']} was already observed "
+                        f"(distance: {dist:.2f} m, "
+                        f"yaw_diff: {np.degrees(yaw_diff):.2f} deg).")
+                    already_visited = True
+                    break
+                else:
+                    LOGGER.info(
+                        f"Cluster {cluster['id']} was in range but outside "
+                        f"camera FOV (yaw_diff: "
+                        f"{np.degrees(yaw_diff):.2f} deg).")
+            else:
+                LOGGER.info(
+                    f"Cluster {cluster['id']} is out of range from previous "
+                    f"observation (distance: {dist:.2f} m).")
                 
         if already_visited:
-            continue # Drop this cluster, the AUV has already explored this physical space
-            
+            continue # Drop this cluster, we have confirmed visual coverage
+
+        # =========================================================
+        # THE MISSING MATH BLOCK: Generate & evaluate viewpoints
+        # =========================================================
         c_complexities = complexities[cluster['global_indices']]
         candidates = generate_cone_viewpoints(cluster['centroid'], cluster['avg_normal'], standoff=2.0)
         
         for cand in candidates:
             gain = evaluate_viewpoint(cand['position'], cluster['points'], cluster['normals'], c_complexities)
             
-            # Instantly drop useless viewpoints
+            # Apply the threshold
             if gain < MIN_RAW_GAIN:
                 continue
                 
-            cost = calculate_kinematic_cost(auv_position, auv_heading, cand['position'], cluster['centroid'], pcd_tree)
+            cost = calculate_kinematic_cost(
+                auv_position, auv_heading, cand['position'], cluster['centroid'], pcd_tree
+            )
             
             all_candidates.append({
                 'cluster_id': cluster['id'],

@@ -343,10 +343,10 @@ def normalize_array(arr):
 if __name__ == "__main__":
     print("Generating environment...")
     # Real AUV coordinates at the start of the pipeline
-    AUV_POSITION = np.array([-17.891,-85.576,-29.370])
+    AUV_POSITION = np.array([-14.054,-82.086,-29.828])
     
     print("Loading real environment...")
-    map_path = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/final_map_ros2.bt"
+    map_path = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/final_map_ros2.bt"
     pcd = load_real_octomap(map_path, AUV_POSITION)
     
     points = np.asarray(pcd.points)

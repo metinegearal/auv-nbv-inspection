@@ -19,6 +19,7 @@ class BenchmarkLogger(Node):
         self.start_time = 0.0
         self.end_time = 0.0
         self.total_distance = 0.0
+        self.data_saved = False
         self.results_dir = self.declare_parameter(
             'results_dir', 'results').value
         self.telemetry = MidrunLogger(
@@ -92,6 +93,9 @@ class BenchmarkLogger(Node):
             self.save_benchmark_data(total_time)
 
     def save_benchmark_data(self, total_time):
+        if self.data_saved:
+            return
+
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_path = self.telemetry.results_dir
         csv_filename = results_path / f"trajectory_benchmark_{timestamp_str}.csv"
@@ -118,13 +122,29 @@ class BenchmarkLogger(Node):
         plot_path = generate_results_plot(self.results_dir)
         if plot_path is not None:
             self.get_logger().info(f'Saved mid-run overview plot to {plot_path}')
+        self.data_saved = True
+
+    def destroy_node(self):
+        """Save the partial trajectory when shutdown is requested."""
+        if not self.data_saved:
+            end_time = time.time()
+            total_time = (
+                end_time - self.start_time if self.start_time > 0.0 else 0.0)
+            self.get_logger().info(
+                'Shutdown requested; saving the current trajectory and plot.')
+            self.save_benchmark_data(total_time)
+        super().destroy_node()
 
 def main(args=None):
     rclpy.init(args=args)
     node = BenchmarkLogger()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info('Ctrl+C received.')
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

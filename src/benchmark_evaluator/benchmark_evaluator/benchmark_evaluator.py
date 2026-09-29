@@ -6,7 +6,7 @@ import copy
 
 def evaluate_map_accuracy(headless=False):
     # File Paths
-    octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/final_map_ros2.bt"
+    octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/final_map_ros2.bt"
     # octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Notes/3d_map_lawnmover/final_map.bt"
     # octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Notes/3d_map_lawnmover/short_v/final_map.bt"
     # ground_truth_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_full.OBJ"
@@ -14,7 +14,8 @@ def evaluate_map_accuracy(headless=False):
     
     # Global Coordinates from Odometry/Simulation
     obj_center_x = -13.0
-    obj_center_y = -84.75
+    # obj_center_y = -84.75 # double station
+    obj_center_y = -81.9 # single station
     surface_z = -32.0
 
     print("=======================================")
@@ -31,7 +32,11 @@ def evaluate_map_accuracy(headless=False):
     occupied_points, _, _ = tree.extractPointCloud()
     
     # Filter Map: Remove seafloor and stray noise below Z = -31.9 (giving a 10cm buffer)
-    valid_map_points = occupied_points[occupied_points[:, 2] > (surface_z + 0.1)]
+    # valid_map_points = occupied_points[occupied_points[:, 2] > (surface_z + 0.1)]
+    valid_map_points = occupied_points[
+        (occupied_points[:, 2] > (surface_z + 0.1)) & 
+        (occupied_points[:, 1] >= -84.75)
+    ]
     
     map_pcd = o3d.geometry.PointCloud()
     map_pcd.points = o3d.utility.Vector3dVector(valid_map_points)
