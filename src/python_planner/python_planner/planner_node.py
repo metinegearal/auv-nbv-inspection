@@ -1,5 +1,6 @@
 import math
 import time
+from pathlib import Path
 
 import numpy as np
 import pyoctomap
@@ -10,6 +11,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image, MagneticField
 from std_msgs.msg import Bool, Float32MultiArray
 from collections import deque
+
+from benchmark_evaluator.midrun_logger import MidrunLogger
 
 from .get_NBV import calculate_nbv_waypoints
 from .route_planning import (
@@ -44,8 +47,10 @@ class NBVUtilityNode(Node):
         self.waypoint_spacing = self.declare_parameter(
             'waypoint_spacing', 0.5).value
         self.map_path = self.declare_parameter(
-            'octomap_path', 'final_map_ros2.bt').value
+            'octomap_path', 'results/final_map_ros2.bt').value
         self.visit_radius = self.declare_parameter('visit_radius', 0.75).value
+        self.results_dir = self.declare_parameter(
+            'results_dir', 'results').value
 
         self.bridge = CvBridge()
         self.position = np.zeros(3, dtype=np.float64)
@@ -73,6 +78,8 @@ class NBVUtilityNode(Node):
         self.camera_offset = np.array([0.35, 0.1125 + 0.275, -0.5])
         self.force_replan = False
         self.visited_targets = []
+        self.selected_targets = []
+        self.telemetry = MidrunLogger(self.results_dir, prefix='planner')
 
         qos = rclpy.qos.QoSProfile(depth=10)
         qos.reliability = rclpy.qos.QoSReliabilityPolicy.BEST_EFFORT
@@ -92,7 +99,8 @@ class NBVUtilityNode(Node):
         self.finished_pub = self.create_publisher(
             Bool, '/movement/finished_execution', 10)
         self.timer = self.create_timer(0.5, self.timer_callback)
-        self.evaluation_file = open('evaluation_parameters.txt', 'a')
+        self.evaluation_file = open(
+            Path(self.results_dir) / 'evaluation_parameters.txt', 'a')
 
         self.get_logger().info('NBV utility node started in Python')
 
@@ -167,6 +175,13 @@ class NBVUtilityNode(Node):
             self.latched_roll = closest_odom[2]
             self.latched_pitch = closest_odom[3]
             self.latched_yaw = closest_odom[4]
+            self.telemetry.record_depth_pose(
+                self.depth_sequence,
+                depth_time,
+                self.latched_position,
+                self.latched_roll,
+                self.latched_pitch,
+                self.latched_yaw)
         else:
             self.get_logger().warning("Depth map timestamp is too far from available odometry history!")
 
@@ -254,6 +269,7 @@ class NBVUtilityNode(Node):
 
     def _plan_and_publish(self, candidates, occupied):
         """Run A*, smooth its route, and publish only a safe trajectory."""
+        self.selected_targets = []
         valid_candidates = [
             candidate for candidate in candidates
             if candidate['utility'] >= self.min_utility
@@ -305,6 +321,7 @@ class NBVUtilityNode(Node):
             
         success = self._publish_trajectory(trajectory)
         if success:
+            self.selected_targets = [np.copy(target) for target in targets]
             # Add the successfully routed targets to our spatial memory
             for target in targets:
                 self.visited_targets.append(target)
@@ -400,6 +417,15 @@ class NBVUtilityNode(Node):
 
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             self.get_logger().info(f'Planning cycle completed in {elapsed_ms:.2f} ms.')
+            self.telemetry.record_iteration(
+                self.iteration,
+                elapsed_ms,
+                self.position,
+                candidates,
+                self.active_trajectory,
+                published,
+                route_blocked,
+                self.selected_targets)
             
             self.evaluation_file.write(
                 f'Process Time (ms): {elapsed_ms}, '

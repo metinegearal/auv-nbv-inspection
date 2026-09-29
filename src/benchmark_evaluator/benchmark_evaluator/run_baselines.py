@@ -7,6 +7,8 @@ import csv
 import time
 from datetime import datetime
 
+from .midrun_logger import MidrunLogger, generate_results_plot
+
 class BenchmarkLogger(Node):
     def __init__(self):
         super().__init__('benchmark_logger')
@@ -17,6 +19,9 @@ class BenchmarkLogger(Node):
         self.start_time = 0.0
         self.end_time = 0.0
         self.total_distance = 0.0
+        self.results_dir = self.declare_parameter(
+            'results_dir', 'results').value
+        self.telemetry = MidrunLogger(self.results_dir)
         
         self.current_x = 0.0
         self.current_y = 0.0
@@ -68,6 +73,10 @@ class BenchmarkLogger(Node):
         self.trajectory_log.append((
             current_time, self.current_x, self.current_y, self.current_z, self.total_distance
         ))
+        self.telemetry.record_trajectory(
+            current_time,
+            (self.current_x, self.current_y, self.current_z),
+            self.total_distance)
 
     def finish_callback(self, msg):
         if msg.data and not self.mission_finished:
@@ -83,9 +92,10 @@ class BenchmarkLogger(Node):
 
     def save_benchmark_data(self, total_time):
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_filename = f"trajectory_benchmark_{timestamp_str}.csv"
+        results_path = self.telemetry.results_dir
+        csv_filename = results_path / f"trajectory_benchmark_{timestamp_str}.csv"
         # txt_filename = f"mission_stats_{timestamp_str}.txt"
-        txt_filename = "optuna_mission_stats.txt"
+        txt_filename = results_path / "optuna_mission_stats.txt"
         
         # 1. Save Trajectory CSV
         with open(csv_filename, 'w', newline='') as f:
@@ -104,6 +114,9 @@ class BenchmarkLogger(Node):
             f.write(f"Total Trajectory Waypoints Logged: {len(self.trajectory_log)}\n")
             
         self.get_logger().info(f"💾 Saved {csv_filename} and {txt_filename}")
+        plot_path = generate_results_plot(self.results_dir)
+        if plot_path is not None:
+            self.get_logger().info(f'Saved mid-run overview plot to {plot_path}')
 
 def main(args=None):
     rclpy.init(args=args)
