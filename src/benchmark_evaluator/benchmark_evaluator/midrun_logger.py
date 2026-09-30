@@ -185,16 +185,23 @@ def generate_results_plot(results_dir='results', prefix='benchmark',
         (-14.1, -82.7), 2.1, 1.6,
         facecolor='#2563eb', edgecolor='#1e3a8a', alpha=0.16,
         linewidth=1.2, label='Rectangle object'))
+    axis.add_patch(Rectangle(
+        (-14.1, -87.4), 2.1, 1.6,
+        facecolor='#2563eb', edgecolor='#1e3a8a', alpha=0.16,
+        linewidth=1.2, label='Mirrored rectangle object'))
     pipe_objects = (
         ((-14.1, -81.1), (-15.7, -78.5)),
         ((-12.1, -81.1), (-11.0, -78.5)),
+        ((-14.1, -88.4), (-15.7, -91.0)),
+        ((-12.1, -88.4), (-11.0, -91.0)),
     )
     for index, (start, end) in enumerate(pipe_objects):
         axis.plot(
             [start[0], end[0]], [start[1], end[1]],
             color='#a16207', linewidth=7, alpha=0.22,
             solid_capstyle='round',
-            label='Pipe objects' if index == 0 else None)
+            label='Pipe objects' if index == 0 else (
+                'Mirrored pipe objects' if index == 2 else None))
         axis.plot(
             [start[0], end[0]], [start[1], end[1]],
             color='#92400e', linewidth=1.2, alpha=0.9,

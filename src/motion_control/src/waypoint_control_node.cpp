@@ -31,6 +31,7 @@ public:
     this->declare_parameter<double>("initial_waypoint_y", 10.0);
     this->declare_parameter<double>("initial_waypoint_z", 5.0);
     this->declare_parameter<double>("max_yaw_command", 10.0);
+    this->declare_parameter<double>("yaw_smoothing_rate", 0.8);
     this->declare_parameter<double>("min_forward_thrust", 1.0);
     this->declare_parameter<double>("max_forward_thrust", 10.0);
     this->declare_parameter<double>("command_multiplier", 2.0);
@@ -43,6 +44,7 @@ public:
     this->get_parameter("initial_waypoint_y", initial_waypoint_y_);
     this->get_parameter("initial_waypoint_z", initial_waypoint_z_);
     this->get_parameter("max_yaw_command", max_yaw_command_);
+    this->get_parameter("yaw_smoothing_rate", yaw_smoothing_rate_);
     this->get_parameter("min_forward_thrust", min_forward_thrust_);
     this->get_parameter("max_forward_thrust", max_forward_thrust_);
     this->get_parameter("command_multiplier", command_multiplier_);
@@ -107,6 +109,7 @@ private:
   double initial_waypoint_y_ = 10.0;
   double initial_waypoint_z_ = 5.0;
   double max_yaw_command_ = 10.0;
+  double yaw_smoothing_rate_ = 0.8;
   double min_forward_thrust_ = 1.0;
   double max_forward_thrust_ = 10.0;
   double command_multiplier_ = 2.0;
@@ -114,6 +117,9 @@ private:
   bool finished_execution_ = false;
   std::optional<double> hardcoded_angle_ = std::nullopt;
   std::optional<double> fixed_angle_ = std::nullopt;
+  bool yaw_smoothing_initialized_ = false;
+  double smoothed_desired_yaw_ = 0.0;
+  double last_yaw_smoothing_time_ = 0.0;
   std::string mode_ = "yaw_centerize";
 
   std::vector<double> last_base_command_;
@@ -138,6 +144,29 @@ private:
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr finished_execution_sub_, dvl_reset_sub_;
 
   double get_time_now() { return this->get_clock()->now().seconds(); }
+
+  double smooth_desired_yaw(double target_yaw)
+  {
+    target_yaw = std::atan2(std::sin(target_yaw), std::cos(target_yaw));
+    const double now = get_time_now();
+    if (!yaw_smoothing_initialized_) {
+      smoothed_desired_yaw_ = target_yaw;
+      last_yaw_smoothing_time_ = now;
+      yaw_smoothing_initialized_ = true;
+      return smoothed_desired_yaw_;
+    }
+
+    const double dt = std::max(0.0, now - last_yaw_smoothing_time_);
+    last_yaw_smoothing_time_ = now;
+    const double yaw_error = std::atan2(
+      std::sin(target_yaw - smoothed_desired_yaw_),
+      std::cos(target_yaw - smoothed_desired_yaw_));
+    const double max_step = std::max(0.0, yaw_smoothing_rate_) * dt;
+    smoothed_desired_yaw_ += std::clamp(yaw_error, -max_step, max_step);
+    smoothed_desired_yaw_ = std::atan2(
+      std::sin(smoothed_desired_yaw_), std::cos(smoothed_desired_yaw_));
+    return smoothed_desired_yaw_;
+  }
 
   void publish_cmd(std::vector<double> motor_command)
   {
@@ -219,12 +248,12 @@ private:
     if (dvl_active_ && dvl_reset_position_.has_value()) {
       for (size_t i = 0; i < 3; ++i) target[i] += dvl_reset_position_.value()[i];
     }
-    if (target[2] < 0) current_position_[2] = current_depth_;
-
     RCLCPP_INFO(this->get_logger(), "From current position: [%.2f, %.2f, %.2f] moving towards waypoint: [%.2f, %.2f, %.2f]", current_position_[0], current_position_[1], current_position_[2], target[0], target[1], target[2]);
 
     std::vector<double> direction(3);
     for (size_t i = 0; i < 3; ++i) direction[i] = target[i] - current_position_[i];
+    if (std::abs(direction[2]) <= stopping_distance_) direction[2] = 0.0;
+
     double distance = std::sqrt(
       direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
 
@@ -239,8 +268,9 @@ private:
     if (distance == 0.0) return;
     for (size_t i = 0; i < 3; ++i) direction[i] /= distance;
 
-    double desired_yaw =
+    double target_yaw =
       fixed_angle_.has_value() ? fixed_angle_.value() : std::atan2(direction[1], direction[0]);
+    double desired_yaw = smooth_desired_yaw(target_yaw);
     double raw_yaw_diff = desired_yaw - current_yaw_;
     double yaw_error = hardcoded_angle_.has_value()
                          ? hardcoded_angle_.value()
@@ -273,9 +303,13 @@ private:
     }
 
     // 2. Calculate Dynamic Surge Speed (Cosine Scaling)
-    // Map distance to a base thrust (the "carrot")
+    // Keep horizontal and vertical thrust independent to avoid Z motion
+    // increasing with the distance to a far-away XY waypoint.
+    double horizontal_distance = std::hypot(direction[0], direction[1]);
     double base_thrust = std::clamp(
-      distance * kp_dist_, min_forward_thrust_, max_forward_thrust_);
+      horizontal_distance * kp_dist_, min_forward_thrust_, max_forward_thrust_);
+    double vertical_thrust = std::clamp(
+      std::abs(direction[2]) * kp_dist_, 0.0, max_forward_thrust_);
 
     // Scale thrust based on how straight we are aiming to prevent corner overshoot
     // cos(yaw_error) smoothly drops the speed as the angle increases.
@@ -286,7 +320,7 @@ private:
     // 3. Apply Positional Movement (Surge/Sway)
     auto auv_pos = utils::world_to_auv_coordinates(direction, 3.0 * M_PI / 2.0 - original_yaw_);
     auto keys = determine_keys(auv_pos);
-    cmd = parse_keys(keys, forward_thrust, cmd);
+    cmd = parse_keys(keys, forward_thrust, cmd, vertical_thrust);
 
     // 4. Overlay Yaw Command simultaneously
     if (mode_ == "yaw_centerize" || mode_ == "full_centerize") {
@@ -333,15 +367,16 @@ private:
   }
 
   std::vector<double> parse_keys(
-    const std::vector<char> & keys, double val, std::vector<double> cmd)
+    const std::vector<char> & keys, double val, std::vector<double> cmd,
+    double vertical_val)
   {
     auto has_key = [&](char k) { return std::find(keys.begin(), keys.end(), k) != keys.end(); };
 
     if (has_key('i')) {
-      for (int i = 0; i < 4; i++) cmd[i] += val;
+      for (int i = 0; i < 4; i++) cmd[i] += vertical_val;
     }
     if (has_key('k')) {
-      for (int i = 0; i < 4; i++) cmd[i] -= val;
+      for (int i = 0; i < 4; i++) cmd[i] -= vertical_val;
     }
     if (has_key('j')) {
       cmd[4] += val;

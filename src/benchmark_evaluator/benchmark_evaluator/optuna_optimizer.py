@@ -1,80 +1,56 @@
 import optuna
 import subprocess
 import time
-import os
 import signal
+import os
+from pathlib import Path
 import yaml
 
-# Import your evaluator (we will modify it slightly to return values)
 from benchmark_evaluator import evaluate_map_accuracy
 
-def write_params_yaml(info_gain, sparsity, min_utility):
-    """Writes the Optuna suggestions to a temporary ROS 2 params file."""
-    params = {
-        'nbv_utility_node': {
-            'ros__parameters': {
-                'info_gain_threshold': float(info_gain),
-                'sparsity_multiplier': float(sparsity),
-                'min_utility_threshold': float(min_utility),
-                'voxel_resolution': 0.1,
-                'max_depth': 4.0,
-                'min_depth': 0.5,
-                'z_min_target': -32.0
-            }
-        },
-        'waypoint_control_node': {
-            'ros__parameters': {
-                'kp_yaw': 0.6,
-                'kp_dist': 0.75,
-                'max_yaw_thrust': 3.0,
-                'absolute_max_motor_signal': 40.0,
-                'yaw_deadband_deg': 15.0,
-                'dvl_active': True
-            }
-        },
-        'point_extract': {
-            'ros__parameters': {
-                'look_ahead_pixels': 100,
-                'angle_weight': 0.5
-            }
-        }
-    }
-    with open('temp_optuna_params.yaml', 'w') as f:
-        yaml.dump(params, f)
+ROS_WORKSPACE = Path(__file__).resolve().parents[3]
+BASE_PARAMS_PATH = ROS_WORKSPACE / 'src' / 'bringup' / 'config' / 'params.yaml'
+TEMP_PARAMS_PATH = ROS_WORKSPACE / 'temp_optuna_params.yaml'
+MAP_PATH = ROS_WORKSPACE / 'results' / 'final_map_ros2.bt'
+MISSION_STATS_PATH = ROS_WORKSPACE / 'results' / 'optuna_mission_stats.txt'
+
+
+def write_params_yaml(min_utility):
+    """Write the current ROS config with the active planner override."""
+    with BASE_PARAMS_PATH.open() as params_file:
+        params = yaml.safe_load(params_file)
+
+    planner_params = params['planner_node']['ros__parameters']
+    planner_params['min_utility_threshold'] = float(min_utility)
+    planner_params['octomap_path'] = str(MAP_PATH)
+    planner_params['results_dir'] = str(ROS_WORKSPACE / 'results')
+    params['run_baselines']['ros__parameters']['results_dir'] = str(
+        ROS_WORKSPACE / 'results'
+    )
+
+    with TEMP_PARAMS_PATH.open('w') as params_file:
+        yaml.safe_dump(params, params_file, sort_keys=False)
 
 def objective(trial):
-    # 1. Optuna suggests hyperparameter values
-    # We know values > 0.18 cause immediate aborts.
-    info_gain = trial.suggest_float('info_gain_threshold', 0.05, 0.17)
-    
-    # We know multipliers > 1.3 make frontiers impossible to find.
-    sparsity = trial.suggest_float('sparsity_multiplier', 0.5, 1.2)
-    
-    # We know low utility (< 0.05) causes AUV to travel too far for bad points.
-    min_utility = trial.suggest_float('min_utility_threshold', 0.05, 0.16)
-    
+    # The active planner uses this threshold to reject low-value viewpoints.
+    min_utility = trial.suggest_float('min_utility_threshold', 0.005, 0.16)
+
     print(f"\n--- Starting Trial {trial.number} ---")
-    print(f"Params: InfoGain={info_gain:.3f}, Sparsity={sparsity:.3f}, MinUtil={min_utility:.4f}")
+    print(f"Params: MinUtil={min_utility:.4f}")
 
     # 2. Write to YAML so ROS 2 can read it
-    write_params_yaml(info_gain, sparsity, min_utility)
+    write_params_yaml(min_utility)
 
     # 3. Clean up old map files so we don't evaluate the previous run
-    map_path = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/final_map_ros2.bt"
-    if os.path.exists(map_path):
-        os.remove(map_path)
-    if os.path.exists("optuna_mission_stats.txt"):
-        os.remove("optuna_mission_stats.txt")
+    for output_path in (MAP_PATH, MISSION_STATS_PATH):
+        output_path.unlink(missing_ok=True)
 
     # 4. Launch the ROS 2 system
-    ws_path = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2"
-    params_path = os.path.abspath("temp_optuna_params.yaml")
-    
     # Chain the sourcing commands with the launch command
     cmd = (
         f"source /opt/ros/jazzy/setup.bash && "
-        f"source {ws_path}/install/setup.bash && "
-        f"ros2 launch bringup mapper.launch.py params_file:={params_path}"
+        f"source {ROS_WORKSPACE}/install/setup.bash && "
+        f"ros2 launch bringup mapper.launch.py params_file:={TEMP_PARAMS_PATH}"
     )
 
     print("Launching ROS 2 stack...")
@@ -92,7 +68,7 @@ def objective(trial):
     mission_success = False
 
     while (time.time() - start_time) < timeout:
-        if os.path.exists("optuna_mission_stats.txt"):
+        if MISSION_STATS_PATH.exists():
             mission_success = True
             break
         time.sleep(2.0)
@@ -111,15 +87,17 @@ def objective(trial):
         pass # Process already exited
 
     time.sleep(3.0) # Settle simulation before the next trial
+    # The benchmark logger saves partial results during graceful shutdown.
+    mission_success = mission_success or MISSION_STATS_PATH.exists()
 
     # 7. Evaluate Fitness
     if not mission_success:
-        print("Trial timed out! Penalizing heavily.")
+        print("Trial timed out before results were saved. Penalizing heavily.")
         return 0.0, 999.0 # 0% coverage, 999m distance
 
     # Read distance from the logger's text file
     total_distance = 999.0
-    with open("optuna_mission_stats.txt", "r") as f:
+    with MISSION_STATS_PATH.open() as f:
         for line in f:
             if "Total Distance Traveled:" in line:
                 total_distance = float(line.split(":")[1].replace("meters", "").strip())
