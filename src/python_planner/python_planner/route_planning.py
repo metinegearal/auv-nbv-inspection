@@ -51,22 +51,28 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
     return []
 
 
-def inflate_occupied(occupied, radius_meters, resolution):
-    """Inflate occupied voxels by the vehicle collision radius."""
-    radius = int(np.ceil(radius_meters / resolution))
-    offsets = []
-    for x in range(-radius, radius + 1):
-        for y in range(-radius, radius + 1):
-            for z in range(-radius, radius + 1):
-                if x * x + y * y + z * z <= radius * radius:
-                    offsets.append((x, y, z))
+def inflate_occupied(occupied_indices, collision_radius, resolution):
+    """Inflate occupied voxels with a precomputed spherical neighborhood."""
+    if not occupied_indices:
+        return set()
+
+    radius_voxels = int(np.ceil(collision_radius / resolution))
+    offsets = [
+        (offset_x, offset_y, offset_z)
+        for offset_x in range(-radius_voxels, radius_voxels + 1)
+        for offset_y in range(-radius_voxels, radius_voxels + 1)
+        for offset_z in range(-radius_voxels, radius_voxels + 1)
+        if offset_x ** 2 + offset_y ** 2 + offset_z ** 2
+        <= radius_voxels ** 2
+    ]
 
     inflated = set()
-    for voxel in occupied:
+    for occupied_x, occupied_y, occupied_z in occupied_indices:
         inflated.update(
-            (voxel[0] + offset[0], voxel[1] + offset[1], voxel[2] + offset[2])
-            for offset in offsets
-        )
+            (occupied_x + offset_x,
+             occupied_y + offset_y,
+             occupied_z + offset_z)
+            for offset_x, offset_y, offset_z in offsets)
     return inflated
 
 

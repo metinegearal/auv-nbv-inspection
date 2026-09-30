@@ -10,20 +10,32 @@ from pathlib import Path
 class MidrunLogger:
     """Write planner and vehicle state without adding ROS message types."""
 
-    def __init__(self, results_dir='results', prefix='benchmark'):
+    def __init__(self, results_dir='results', prefix='benchmark',
+                 pipeline_only=False, trajectory_only=False):
         self.results_dir = Path(results_dir).expanduser()
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.prefix = prefix
+        self.pipeline_only = pipeline_only
+        self.trajectory_only = trajectory_only
         self.trajectory_path = self.results_dir / f'{prefix}_trajectory.csv'
         self.depth_pose_path = self.results_dir / f'{prefix}_depth_poses.csv'
         self.iteration_path = self.results_dir / f'{prefix}_nbv_iterations.jsonl'
         self.future_path = self.results_dir / f'{prefix}_future_trajectories.csv'
+        self.pipeline_path = self.results_dir / f'{prefix}_pipeline_timing.csv'
         self._reset_files()
 
     def _reset_files(self):
+        if self.pipeline_only:
+            with self.pipeline_path.open('w', newline='') as stream:
+                csv.writer(stream).writerow([
+                    'stage', 'iteration', 'frame_id', 'duration_ms',
+                    'source_stamp_s', 'details'])
+            return
         with self.trajectory_path.open('w', newline='') as stream:
             csv.writer(stream).writerow(
                 ['time_s', 'x_m', 'y_m', 'z_m', 'cumulative_distance_m'])
+            if self.trajectory_only:
+                return
         with self.depth_pose_path.open('w', newline='') as stream:
             csv.writer(stream).writerow([
                 'depth_sequence', 'depth_time_s', 'x_m', 'y_m', 'z_m',
@@ -31,6 +43,10 @@ class MidrunLogger:
         with self.future_path.open('w', newline='') as stream:
             csv.writer(stream).writerow([
                 'iteration', 'waypoint_index', 'x_m', 'y_m', 'z_m', 'yaw_rad'])
+        with self.pipeline_path.open('w', newline='') as stream:
+            csv.writer(stream).writerow([
+                'stage', 'iteration', 'frame_id', 'duration_ms',
+                'source_stamp_s', 'details'])
         self.iteration_path.write_text('', encoding='utf-8')
 
     @staticmethod
@@ -42,6 +58,18 @@ class MidrunLogger:
             csv.writer(stream).writerow([
                 f'{time_s:.6f}', *[f'{value:.6f}' for value in self._vector(position)],
                 f'{cumulative_distance:.6f}'])
+
+    def record_stage(self, stage, duration_ms, iteration=None, frame_id=None,
+                     source_stamp_s=None, details=''):
+        with self.pipeline_path.open('a', newline='') as stream:
+            csv.writer(stream).writerow([
+                stage,
+                '' if iteration is None else iteration,
+                '' if frame_id is None else frame_id,
+                f'{float(duration_ms):.6f}',
+                '' if source_stamp_s is None else f'{float(source_stamp_s):.9f}',
+                details,
+            ])
 
     def record_depth_pose(self, sequence, depth_time_s, position, roll, pitch, yaw):
         with self.depth_pose_path.open('a', newline='') as stream:

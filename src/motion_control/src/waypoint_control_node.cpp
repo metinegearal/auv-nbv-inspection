@@ -26,10 +26,26 @@ public:
     this->declare_parameter<double>("kp_yaw", 0.6);
     this->declare_parameter<double>("kp_dist", 0.75);
     this->declare_parameter<bool>("dvl_active", false);
+    this->declare_parameter<double>("stopping_distance", 0.25);
+    this->declare_parameter<double>("initial_waypoint_x", 10.0);
+    this->declare_parameter<double>("initial_waypoint_y", 10.0);
+    this->declare_parameter<double>("initial_waypoint_z", 5.0);
+    this->declare_parameter<double>("max_yaw_command", 10.0);
+    this->declare_parameter<double>("min_forward_thrust", 1.0);
+    this->declare_parameter<double>("max_forward_thrust", 10.0);
+    this->declare_parameter<double>("command_multiplier", 2.0);
 
     this->get_parameter("kp_yaw", kp_yaw_);
     this->get_parameter("kp_dist", kp_dist_);
     this->get_parameter("dvl_active", dvl_active_);
+    this->get_parameter("stopping_distance", stopping_distance_);
+    this->get_parameter("initial_waypoint_x", initial_waypoint_x_);
+    this->get_parameter("initial_waypoint_y", initial_waypoint_y_);
+    this->get_parameter("initial_waypoint_z", initial_waypoint_z_);
+    this->get_parameter("max_yaw_command", max_yaw_command_);
+    this->get_parameter("min_forward_thrust", min_forward_thrust_);
+    this->get_parameter("max_forward_thrust", max_forward_thrust_);
+    this->get_parameter("command_multiplier", command_multiplier_);
 
     waypoint_ = {0.0, 0.0, -26.0};
     magnet_ = {0.0, 0.0, 0.0};
@@ -65,7 +81,8 @@ public:
     dvl_reset_sub_ = this->create_subscription<std_msgs::msg::Bool>(
       "/movement/dvl_reset", 10, std::bind(&WaypointControlNode::dvl_reset_callback, this, _1));
 
-    move_towards_waypoint({10.0, 10.0, 5.0});
+    move_towards_waypoint({
+      initial_waypoint_x_, initial_waypoint_y_, initial_waypoint_z_});
     RCLCPP_INFO(this->get_logger(), "✅ Waypoint Control Node Started (Cleaned Edition)");
   }
 
@@ -85,6 +102,14 @@ private:
 
   double kp_dist_;
   double kp_yaw_;
+  double stopping_distance_ = 0.25;
+  double initial_waypoint_x_ = 10.0;
+  double initial_waypoint_y_ = 10.0;
+  double initial_waypoint_z_ = 5.0;
+  double max_yaw_command_ = 10.0;
+  double min_forward_thrust_ = 1.0;
+  double max_forward_thrust_ = 10.0;
+  double command_multiplier_ = 2.0;
 
   bool finished_execution_ = false;
   std::optional<double> hardcoded_angle_ = std::nullopt;
@@ -198,7 +223,7 @@ private:
       direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
 
     // Stopping condition
-    if (utils::diff_2d(target, current_position_) < 0.5) {
+    if (utils::diff_2d(target, current_position_) < stopping_distance_) {
       std_msgs::msg::Float32MultiArray stop_msg;
       std::vector<float> f_target(target.begin(), target.end());
       stop_msg.data = f_target;
@@ -234,7 +259,8 @@ private:
       yaw_command = kp_yaw_ * yaw_error;
 
       // Clamp it to maximum thrust
-      yaw_command = std::clamp(yaw_command, -10.0, 10.0);
+      yaw_command = std::clamp(
+        yaw_command, -max_yaw_command_, max_yaw_command_);
 
       // YOUR original inversion to match thruster polarity
       yaw_command = -yaw_command;
@@ -242,7 +268,8 @@ private:
 
     // 2. Calculate Dynamic Surge Speed (Cosine Scaling)
     // Map distance to a base thrust (the "carrot")
-    double base_thrust = std::clamp(distance * kp_dist_, 1.0, 10.0);
+    double base_thrust = std::clamp(
+      distance * kp_dist_, min_forward_thrust_, max_forward_thrust_);
 
     // Scale thrust based on how straight we are aiming to prevent corner overshoot
     // cos(yaw_error) smoothly drops the speed as the angle increases.
@@ -268,7 +295,7 @@ private:
 
     motor_command_ = cmd;
     std::vector<double> scaled_cmd = cmd;
-    for (auto & val : scaled_cmd) val *= 2.0; // Global multiplier
+    for (auto & val : scaled_cmd) val *= command_multiplier_;
 
     publish_cmd(scaled_cmd);
   }

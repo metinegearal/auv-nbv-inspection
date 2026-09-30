@@ -31,24 +31,24 @@ class NBVUtilityNode(Node):
         super().__init__('nbv_utility_node')
 
         self.resolution = self.declare_parameter('voxel_resolution', 0.1).value
-        self.max_depth = self.declare_parameter('max_depth', 4.0).value
+        self.max_depth = self.declare_parameter('max_depth', 3.0).value
         self.min_depth = self.declare_parameter('min_depth', 0.5).value
         self.z_min_target = self.declare_parameter(
             'z_min_target', -31.5).value
-        self.depth_stride = self.declare_parameter('depth_stride', 4).value
+        self.depth_stride = self.declare_parameter('depth_stride', 8).value
         self.depth_scale = self.declare_parameter('depth_scale', 1.0).value
-        self.frame_period = self.declare_parameter('planning_period', 6).value
+        self.frame_period = self.declare_parameter('planning_period', 10).value
         self.min_utility = self.declare_parameter(
             'min_utility_threshold', 0.005).value
         self.collision_radius = self.declare_parameter(
             'collision_radius', 0.6).value
         self.trajectory_points = self.declare_parameter(
-            'trajectory_points', 200).value
+            'trajectory_points', 300).value
         self.waypoint_spacing = self.declare_parameter(
             'waypoint_spacing', 0.5).value
         self.map_path = self.declare_parameter(
             'octomap_path', 'results/final_map_ros2.bt').value
-        self.visit_radius = self.declare_parameter('visit_radius', 0.75).value
+        self.visit_radius = self.declare_parameter('visit_radius', 0.25).value
         self.results_dir = self.declare_parameter(
             'results_dir', 'results').value
 
@@ -80,6 +80,7 @@ class NBVUtilityNode(Node):
         self.visited_targets = []
         self.selected_targets = []
         self.telemetry = MidrunLogger(self.results_dir, prefix='planner')
+        self.failed_plan_count = 0
 
         qos = rclpy.qos.QoSProfile(depth=10)
         qos.reliability = rclpy.qos.QoSReliabilityPolicy.BEST_EFFORT
@@ -183,7 +184,7 @@ class NBVUtilityNode(Node):
                 self.latched_pitch,
                 self.latched_yaw)
         else:
-            self.get_logger().warning("Depth map timestamp is too far from available odometry history!")
+            self.get_logger().warning("Depth map timestamp is too far! Closest odometry is %.3f seconds away. Using the most recent odometry instead." % (abs(closest_odom[0] - depth_time)))
 
     def _depth_points(self, depth_frame):
         """Project a depth image into the vehicle world frame."""
@@ -233,6 +234,11 @@ class NBVUtilityNode(Node):
             # Warn if the camera only sees empty water outside max_depth
             self.get_logger().warning('Depth projection yielded 0 valid points (all out of range or invalid).', throttle_duration_sec=2.0)
             return
+
+        if len(points) > 4000:
+            # Randomly sample exactly 4000 points to preserve the pipe's overall shape
+            indices = np.random.choice(len(points), 4000, replace=False)
+            points = points[indices]
             
         sensor_origin = self.position + self.camera_offset
         self.octree.insertPointCloud(
@@ -282,17 +288,22 @@ class NBVUtilityNode(Node):
              np.asarray(candidate['target'], dtype=np.float64))
             for candidate in valid_candidates
         ]
+        route_started = time.perf_counter()
         route, targets = plan_multi_waypoint_route(
             self.position + self.camera_offset,
             route_candidates,
             occupied,
             self.resolution,
         )
+        self.telemetry.record_stage(
+            'route_search', (time.perf_counter() - route_started) * 1000.0,
+            iteration=self.iteration)
         if len(route) == 0 or not path_is_collision_free(
                 route, occupied, self.resolution):
             self.get_logger().warning('A* produced no collision-free route')
             return False
 
+        trajectory_started = time.perf_counter()
         trajectory = generate_smooth_trajectory(
             route,
             targets,
@@ -317,9 +328,22 @@ class NBVUtilityNode(Node):
             self.get_logger().warning(
                 'Resampled spline intersects the collision boundary; '
                 'route rejected')
+            self.telemetry.record_stage(
+                'trajectory_generation_and_validation',
+                (time.perf_counter() - trajectory_started) * 1000.0,
+                iteration=self.iteration, details='rejected')
             return False
+        self.telemetry.record_stage(
+            'trajectory_generation_and_validation',
+            (time.perf_counter() - trajectory_started) * 1000.0,
+            iteration=self.iteration)
             
+        publish_started = time.perf_counter()
         success = self._publish_trajectory(trajectory)
+        self.telemetry.record_stage(
+            'trajectory_publish', (time.perf_counter() - publish_started) * 1000.0,
+            iteration=self.iteration,
+            details='published' if success else 'rejected')
         if success:
             self.selected_targets = [np.copy(target) for target in targets]
             # Add the successfully routed targets to our spatial memory
@@ -355,16 +379,28 @@ class NBVUtilityNode(Node):
 
         # 2. ACCUMULATION PHASE
         started = time.perf_counter()
+        stage_started = time.perf_counter()
         self._accumulate_depth()
+        self.telemetry.record_stage(
+            'depth_to_octomap', (time.perf_counter() - stage_started) * 1000.0,
+            iteration=self.iteration, frame_id=self.depth_sequence)
         self.processed_depth_sequence = self.depth_sequence
         
+        stage_started = time.perf_counter()
         occupied_points = self._occupied_points()
+        self.telemetry.record_stage(
+            'octomap_extract', (time.perf_counter() - stage_started) * 1000.0,
+            iteration=self.iteration, frame_id=self.depth_sequence)
         self.get_logger().info(f'Iteration {self.iteration}: OctoMap total size = {len(occupied_points)} voxels.', throttle_duration_sec=2.0)
         
+        stage_started = time.perf_counter()
         occupied_indices = set(map(
             tuple, np.floor(occupied_points / self.resolution).astype(int)))
         collision_voxels = inflate_occupied(
             occupied_indices, self.collision_radius, self.resolution)
+        self.telemetry.record_stage(
+            'collision_inflation', (time.perf_counter() - stage_started) * 1000.0,
+            iteration=self.iteration, frame_id=self.depth_sequence)
             
         route_blocked = not self._active_trajectory_is_safe(collision_voxels)
         if route_blocked:
@@ -382,10 +418,15 @@ class NBVUtilityNode(Node):
             self.force_replan = False # Reset the flag
             self.get_logger().info(f'--- PLANNING TRIGGERED (Iteration {self.iteration}) ---')
             self.get_logger().info(f'Saving OctoMap to: {self.map_path}')
+            stage_started = time.perf_counter()
             self.octree.write(self.map_path)
+            self.telemetry.record_stage(
+                'octomap_save', (time.perf_counter() - stage_started) * 1000.0,
+                iteration=self.iteration)
             
             heading = np.array([math.cos(self.yaw), math.sin(self.yaw), 0.0])
             
+            nbv_started = time.perf_counter()
             try:
                 self.get_logger().info('Calculating NBV waypoints...')
                 candidates = calculate_nbv_waypoints(
@@ -399,21 +440,43 @@ class NBVUtilityNode(Node):
             except (ValueError, RuntimeError) as error:
                 self.get_logger().error(f'NBV calculation failed: {error}')
                 candidates = []
+            self.telemetry.record_stage(
+                'nbv_generation', (time.perf_counter() - nbv_started) * 1000.0,
+                iteration=self.iteration,
+                details=f'candidates={len(candidates)}')
 
             published = self._plan_and_publish(candidates, collision_voxels)
-            
-            # CRITICAL FIX: Only end the mission if there are literally zero frontiers left.
-            if len(candidates) == 0 and self.started_mapping:
+
+            if published:
+                self.failed_plan_count = 0  # Reset counter on success
+            else:
+                self.failed_plan_count += 1
+                if len(candidates) > 0:
+                    self.get_logger().warning(f'Spline generation failed. Strike {self.failed_plan_count}/3')
+                else:
+                    self.get_logger().warning(f'No frontiers found. Strike {self.failed_plan_count}/3')
+
+            # If we fail 3 times in a row, end the mission regardless of started_mapping
+            if self.failed_plan_count >= 3:
                 self.finished_mapping = True
                 self.finished_pub.publish(Bool(data=True))
                 
-                # FORCE FINAL SAVE TO DISK BEFORE EXITING
                 self.get_logger().info('Flushing final RAM state to OctoMap file...')
                 self.octree.write(self.map_path)
+                self.get_logger().info('✅ Mapping finished. Reached maximum consecutive failures (Pipe end or No geometry).')
+            
+            # CRITICAL FIX: Only end the mission if there are literally zero frontiers left.
+            # if len(candidates) == 0 and self.started_mapping:
+            #     self.finished_mapping = True
+            #     self.finished_pub.publish(Bool(data=True))
                 
-                self.get_logger().info('✅ Mapping finished. Explored all accessible frontiers.')
-            elif not published and len(candidates) > 0:
-                self.get_logger().warning('Failed to generate a collision-free spline to the targets. Retrying next cycle...')
+            #     # FORCE FINAL SAVE TO DISK BEFORE EXITING
+            #     self.get_logger().info('Flushing final RAM state to OctoMap file...')
+            #     self.octree.write(self.map_path)
+                
+            #     self.get_logger().info('✅ Mapping finished. Explored all accessible frontiers.')
+            # elif not published and len(candidates) > 0:
+            #     self.get_logger().warning('Failed to generate a collision-free spline to the targets. Retrying next cycle...')
 
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             self.get_logger().info(f'Planning cycle completed in {elapsed_ms:.2f} ms.')
@@ -431,7 +494,10 @@ class NBVUtilityNode(Node):
                 f'Process Time (ms): {elapsed_ms}, '
                 f'Total Leaves: {self.octree.getNumLeafNodes()}\n')
             self.evaluation_file.flush()
-            
+        self.telemetry.record_stage(
+            'planning_cycle_total', (time.perf_counter() - started) * 1000.0,
+            iteration=self.iteration, frame_id=self.depth_sequence)
+
         self.iteration += 1
 
     def destroy_node(self):
