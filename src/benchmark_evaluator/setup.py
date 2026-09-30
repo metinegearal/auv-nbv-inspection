@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'matplotlib'],
     zip_safe=True,
     maintainer='metin-ege',
     maintainer_email='metinegearal@gmail.com',
@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'run_baselines = benchmark_evaluator.run_baselines:main'
+            'run_baselines = benchmark_evaluator.run_baselines:main',
+            'plot_benchmark_results = benchmark_evaluator.plot_results:main',
         ],
     },
 )

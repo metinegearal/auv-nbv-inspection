@@ -236,12 +236,77 @@ RealTimeStereoMapper::generate_candidate_viewpoints(const Eigen::Vector3d& curre
     // ==========================================
     // 2. Evaluate Utility & Generate Viewpoints
     // ==========================================
+    // std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> candidates;
+    // double alpha_cost = 1.0;
+    // double min_utility_threshold = config_.min_utility_threshold;
+
+    // std::vector<double> dists = {1.5, 1.2, 1.8, 1.0};
+    // std::vector<double> pitches = {45.0, 60.0, 30.0, 75.0, 15.0};
+
+    // int skipped_wall = 0;
+    // int skipped_los = 0;
+    // int skipped_utility = 0;
+
+    // for (size_t i = 0; i < frontier_centers.size(); ++i) {
+    //     Eigen::Vector3d f = frontier_centers[i];
+    //     Eigen::Vector3d vec = f - current_pos_offset;
+    //     vec.z() = 0;
+        
+    //     double norm = vec.norm();
+    //     Eigen::Vector3d dir_xy = (norm < 1e-5) ? Eigen::Vector3d(1, 0, 0) : (vec / norm);
+
+    //     bool found_view = false;
+    //     for (double dist : dists) {
+    //         if (found_view) break;
+    //         for (double p_deg : pitches) {
+    //             double pitch = p_deg * M_PI / 180.0;
+    //             Eigen::Vector3d viewpoint = f - dir_xy * (dist * std::cos(pitch)) + Eigen::Vector3d(0, 0, dist * std::sin(pitch));
+
+    //             VoxelIdx vp_idx = {
+    //                 static_cast<int>(std::floor(viewpoint.x() / config_.resolution)),
+    //                 static_cast<int>(std::floor(viewpoint.y() / config_.resolution)),
+    //                 static_cast<int>(std::floor(viewpoint.z() / config_.resolution))
+    //             };
+                
+    //             if (occ_set.count(vp_idx)) {
+    //                 skipped_wall++;
+    //                 continue; 
+    //             }
+
+    //             if (SearchAlgo::check_line_of_sight(viewpoint, f, occ_set, resolution_)) {
+    //                 double travel_cost = (viewpoint - current_pos_offset).norm() + 0.1;
+    //                 double utility = frontier_scores[i] / (alpha_cost * travel_cost);
+                    
+    //                 if (utility >= min_utility_threshold) {
+    //                     candidates.push_back({viewpoint, f});
+    //                     found_view = true;
+    //                     break;
+    //                 } else {
+    //                     skipped_utility++;
+    //                 }
+    //             } else {
+    //                 skipped_los++;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // std::cout << "[DEBUG 5] Candidate Generation:" << std::endl;
+    // std::cout << "  -> Rejected (Inside Wall): " << skipped_wall << std::endl;
+    // std::cout << "  -> Rejected (No Line of Sight): " << skipped_los << std::endl;
+    // std::cout << "  -> Rejected (Low Utility): " << skipped_utility << std::endl;
+    // std::cout << "  -> Accepted Viewpoints: " << candidates.size() << std::endl;
+
+
     std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> candidates;
     double alpha_cost = 1.0;
     double min_utility_threshold = config_.min_utility_threshold;
 
-    std::vector<double> dists = {2.0, 1.5, 3.0, 1.0};
-    std::vector<double> pitches = {45.0, 60.0, 30.0, 75.0, 15.0};
+    std::vector<double> dists = {1.5, 2.0, 1.2}; // Keep it close for good stereo disparity
+    std::vector<double> pitches = {30.0, 45.0, 60.0};
+    
+    // 8 points around the compass (45-degree increments)
+    std::vector<double> yaws = {0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0};
 
     int skipped_wall = 0;
     int skipped_los = 0;
@@ -249,53 +314,54 @@ RealTimeStereoMapper::generate_candidate_viewpoints(const Eigen::Vector3d& curre
 
     for (size_t i = 0; i < frontier_centers.size(); ++i) {
         Eigen::Vector3d f = frontier_centers[i];
-        Eigen::Vector3d vec = f - current_pos_offset;
-        vec.z() = 0;
         
-        double norm = vec.norm();
-        Eigen::Vector3d dir_xy = (norm < 1e-5) ? Eigen::Vector3d(1, 0, 0) : (vec / norm);
-
         bool found_view = false;
-        for (double dist : dists) {
+        
+        // Search 360 degrees around the frontier for a valid viewing angle!
+        for (double yaw_deg : yaws) {
             if (found_view) break;
-            for (double p_deg : pitches) {
-                double pitch = p_deg * M_PI / 180.0;
-                Eigen::Vector3d viewpoint = f - dir_xy * (dist * std::cos(pitch)) + Eigen::Vector3d(0, 0, dist * std::sin(pitch));
-
-                VoxelIdx vp_idx = {
-                    static_cast<int>(std::floor(viewpoint.x() / config_.resolution)),
-                    static_cast<int>(std::floor(viewpoint.y() / config_.resolution)),
-                    static_cast<int>(std::floor(viewpoint.z() / config_.resolution))
-                };
-                
-                if (occ_set.count(vp_idx)) {
-                    skipped_wall++;
-                    continue; 
-                }
-
-                if (SearchAlgo::check_line_of_sight(viewpoint, f, occ_set, resolution_)) {
-                    double travel_cost = (viewpoint - current_pos_offset).norm() + 0.1;
-                    double utility = frontier_scores[i] / (alpha_cost * travel_cost);
+            
+            double yaw_rad = yaw_deg * M_PI / 180.0;
+            Eigen::Vector3d dir_xy(std::cos(yaw_rad), std::sin(yaw_rad), 0.0);
+            
+            for (double dist : dists) {
+                if (found_view) break;
+                for (double p_deg : pitches) {
+                    double pitch = p_deg * M_PI / 180.0;
                     
-                    if (utility >= min_utility_threshold) {
-                        candidates.push_back({viewpoint, f});
-                        found_view = true;
-                        break;
-                    } else {
-                        skipped_utility++;
+                    // Generate viewpoint independent of AUV's current location
+                    Eigen::Vector3d viewpoint = f - dir_xy * (dist * std::cos(pitch)) + Eigen::Vector3d(0, 0, dist * std::sin(pitch));
+
+                    VoxelIdx vp_idx = {
+                        static_cast<int>(std::floor(viewpoint.x() / config_.resolution)),
+                        static_cast<int>(std::floor(viewpoint.y() / config_.resolution)),
+                        static_cast<int>(std::floor(viewpoint.z() / config_.resolution))
+                    };
+                    
+                    if (occ_set.count(vp_idx)) {
+                        skipped_wall++;
+                        continue; 
                     }
-                } else {
-                    skipped_los++;
+
+                    if (SearchAlgo::check_line_of_sight(viewpoint, f, occ_set, config_.resolution)) {
+                        // Calculate travel cost from the AUV's actual position
+                        double travel_cost = (viewpoint - current_pos_offset).norm() + 0.1;
+                        double utility = frontier_scores[i] / (alpha_cost * travel_cost);
+                        
+                        if (utility >= min_utility_threshold) {
+                            candidates.push_back({viewpoint, f});
+                            found_view = true;
+                            break; // Move to the next frontier!
+                        } else {
+                            skipped_utility++;
+                        }
+                    } else {
+                        skipped_los++;
+                    }
                 }
             }
         }
     }
-
-    std::cout << "[DEBUG 5] Candidate Generation:" << std::endl;
-    std::cout << "  -> Rejected (Inside Wall): " << skipped_wall << std::endl;
-    std::cout << "  -> Rejected (No Line of Sight): " << skipped_los << std::endl;
-    std::cout << "  -> Rejected (Low Utility): " << skipped_utility << std::endl;
-    std::cout << "  -> Accepted Viewpoints: " << candidates.size() << std::endl;
 
     // ==========================================
     // 2.7 FOV-BASED VIEWPOINT CULLING

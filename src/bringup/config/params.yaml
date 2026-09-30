@@ -21,6 +21,8 @@ nbv_utility_node:
     
     # Exploration Filters (Lowering these means MORE points are accepted as targets)
     z_min_target: -32.0          # INCREASED depth limit from -32.0
-    info_gain_threshold: 0.12    # DECREASED from 0.15 (Accepts less informative points)
-    sparsity_multiplier: 1.1     # DECREASED from 1.2 (Allows denser clusters to be frontiers)
+    info_gain_threshold: 0.087    # DECREASED from 0.15 (Accepts less informative points)
+    sparsity_multiplier: 1.03     # DECREASED from 1.2 (Allows denser clusters to be frontiers)
     min_utility_threshold: 0.01 # DECREASED from 0.02 (Accepts less efficient viewpoints)
+
+    # [-19, -85, -29], [-53, -100, -28]

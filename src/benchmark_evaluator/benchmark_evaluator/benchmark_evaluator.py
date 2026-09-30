@@ -4,7 +4,7 @@ import pyoctomap
 import matplotlib.pyplot as plt
 import copy
 
-def evaluate_map_accuracy():
+def evaluate_map_accuracy(headless=False):
     # File Paths
     octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/final_map_ros2.bt"
     # octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Notes/3d_map_lawnmover/final_map.bt"
@@ -110,6 +110,9 @@ def evaluate_map_accuracy():
     print(f"RMSE (Accuracy):        {rmse:.4f} m")
     print(f"Surface Coverage:       {coverage_percentage:.2f} % (at {coverage_threshold}m threshold)")
     print("=======================================\n")
+
+    if headless:
+        return coverage_percentage, rmse
 
     # ==========================================
     # 5. HEATMAP COLORIZATION & VISUALIZATION

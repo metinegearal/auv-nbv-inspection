@@ -22,7 +22,7 @@ public:
         cfg.resolution = this->declare_parameter("voxel_resolution", 0.1);
         cfg.max_depth = this->declare_parameter("max_depth", 5.0);
         cfg.min_depth = this->declare_parameter("min_depth", 0.5);
-        cfg.z_min_target = this->declare_parameter("z_min_target", -34.0);
+        cfg.z_min_target = this->declare_parameter("z_min_target", -32.0);
         cfg.info_gain_threshold = this->declare_parameter("info_gain_threshold", 0.05);
         cfg.sparsity_multiplier = this->declare_parameter("sparsity_multiplier", 0.8);
         cfg.min_utility_threshold = this->declare_parameter("min_utility_threshold", 0.005);
@@ -67,6 +67,9 @@ private:
     std::unique_ptr<RealTimeStereoMapper> mapper_;
     Eigen::Vector3d current_position_{0, 0, 0};
     double yaw_ = 0, pitch_ = 0, roll_ = 0;
+
+    Eigen::Vector3d latched_pos_{0, 0, 0};
+    double latched_yaw_ = 0, latched_pitch_ = 0, latched_roll_ = 0;
     
     cv::Mat left_image_;
     cv::Mat depth_frame_;
@@ -115,6 +118,11 @@ private:
     void depth_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
         // Passing msg->encoding dynamically adapts to the incoming format
         depth_frame_ = cv_bridge::toCvCopy(msg, msg->encoding)->image;
+
+        latched_pos_ = current_position_;
+        latched_yaw_ = yaw_;
+        latched_pitch_ = pitch_;
+        latched_roll_ = roll_;
     }
 
     void timer_callback() {
@@ -126,17 +134,14 @@ private:
 
         auto start_proc = std::chrono::high_resolution_clock::now();
         
-        mapper_->process_frame(current_position_, yaw_, pitch_, roll_, left_image_, depth_frame_);
-        if (iter_count_ == 11) {
-            RCLCPP_INFO(this->get_logger(), "DEBUG MAP POS: AUV is at %.2f, %.2f, %.2f", 
-                        current_position_.x(), current_position_.y(), current_position_.z());
-        }
+        mapper_->process_frame(latched_pos_, latched_yaw_, latched_pitch_, latched_roll_, left_image_, depth_frame_);
         
-        if (iter_count_ % 10 == 0) {
+        if (iter_count_ % 20 == 0) {
             static std::ofstream eval_file("evaluation_parameters.txt", std::ios::app);
             auto start_time = std::chrono::high_resolution_clock::now();
 
-            mapper_->save_map("final_map_ros2.bt");
+            std::string map_path = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/final_map_ros2.bt";
+            mapper_->save_map(map_path);
 
             auto [viewpoints, trajectories] = mapper_->generate_candidate_viewpoints(current_position_);
             

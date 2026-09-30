@@ -1,49 +1,73 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Find the parameter file
+    # 1. Set up the default paths (used if no arguments are passed)
     bringup_dir = get_package_share_directory('bringup')
-    config_file = os.path.join(bringup_dir, 'config', 'params.yaml')
-    holo_config_file = os.path.join(bringup_dir, 'config', 'holoocean_config.json')
+    default_config_file = os.path.join(bringup_dir, 'config', 'params.yaml')
+    default_holo_config_file = os.path.join(bringup_dir, 'config', 'holoocean_config.json')
+
+    # 2. Create LaunchConfigurations to hold the runtime values
+    params_file = LaunchConfiguration('params_file')
+    holo_config = LaunchConfiguration('holo_config_file')
+
+    # 3. Declare the launch arguments so they are exposed to the CLI
+    declare_params_file_cmd = DeclareLaunchArgument(
+        'params_file',
+        default_value=default_config_file,
+        description='Full path to the ROS 2 parameters YAML file to use'
+    )
+
+    declare_holo_config_cmd = DeclareLaunchArgument(
+        'holo_config_file',
+        default_value=default_holo_config_file,
+        description='Full path to the HoloOcean configuration JSON file to use'
+    )
 
     return LaunchDescription([
+        # Add the declarations to the LaunchDescription first
+        declare_params_file_cmd,
+        declare_holo_config_cmd,
+        
+        # Now pass the LaunchConfigurations into the nodes instead of the hardcoded strings
         Node(
             package='sim_bridge',
             executable='holoocean_node',
             name='holoocean_node',
-            parameters=[config_file, {'holoocean_config_path': holo_config_file}]
+            parameters=[params_file, {'holoocean_config_path': holo_config}]
         ),
         Node(
             package='perception',
             executable='depth_estimation',
             name='depth_estimation',
-            parameters=[config_file]
+            parameters=[params_file]
         ),
         Node(
             package='motion_control',
             executable='waypoint_control_node',
             name='waypoint_control_node',
-            parameters=[config_file]
+            parameters=[params_file]
         ),
         Node(
             package='motion_control',
             executable='point_iterator',
             name='point_iterator',
-            parameters=[config_file]
+            parameters=[params_file]
         ),
         Node(
-            package='active_inspection_planner',
-            executable='nbv_utility_node',
-            name='nbv_utility_node',
-            parameters=[config_file]
+            package='python_planner',
+            executable='planner_node',
+            name='planner_node',
+            parameters=[params_file]
         ),
         Node(
             package='benchmark_evaluator',
             executable='run_baselines',
             name='run_baselines',
-            parameters=[config_file]
+            parameters=[params_file]
         )
     ])
