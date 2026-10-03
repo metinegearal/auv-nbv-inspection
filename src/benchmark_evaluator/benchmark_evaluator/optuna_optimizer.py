@@ -15,13 +15,17 @@ MAP_PATH = ROS_WORKSPACE / 'results' / 'final_map_ros2.bt'
 MISSION_STATS_PATH = ROS_WORKSPACE / 'results' / 'optuna_mission_stats.txt'
 
 
-def write_params_yaml(min_utility):
-    """Write the current ROS config with the active planner override."""
+def write_params_yaml(params_dict):
+    """Write the current ROS config with the active planner overrides."""
     with BASE_PARAMS_PATH.open() as params_file:
         params = yaml.safe_load(params_file)
 
     planner_params = params['planner_node']['ros__parameters']
-    planner_params['min_utility_threshold'] = float(min_utility)
+    
+    # Dynamically inject all Optuna suggestions into the ROS 2 params
+    for key, value in params_dict.items():
+        planner_params[key] = float(value)
+
     planner_params['octomap_path'] = str(MAP_PATH)
     planner_params['results_dir'] = str(ROS_WORKSPACE / 'results')
     params['run_baselines']['ros__parameters']['results_dir'] = str(
@@ -32,21 +36,27 @@ def write_params_yaml(min_utility):
         yaml.safe_dump(params, params_file, sort_keys=False)
 
 def objective(trial):
-    # The active planner uses this threshold to reject low-value viewpoints.
-    min_utility = trial.suggest_float('min_utility_threshold', 0.005, 0.16)
+    # Sample all 6 parameters based on the requested ranges
+    params_dict = {
+        'min_utility_threshold': trial.suggest_float('min_utility_threshold', 0.05, 0.35),
+        'nbv_standoff': trial.suggest_float('nbv_standoff', 1.0, 2.5),
+        'nbv_distance_weight': trial.suggest_float('nbv_distance_weight', 0.5, 2.0),
+        'nbv_rotation_weight': trial.suggest_float('nbv_rotation_weight', 0.1, 1.0),
+        'nbv_collision_weight': trial.suggest_float('nbv_collision_weight', 1.0, 5.0),
+        'nbv_min_raw_gain': trial.suggest_float('nbv_min_raw_gain', 0.2, 1.0),
+    }
 
     print(f"\n--- Starting Trial {trial.number} ---")
-    print(f"Params: MinUtil={min_utility:.4f}")
+    print(f"Params: {params_dict}")
 
-    # 2. Write to YAML so ROS 2 can read it
-    write_params_yaml(min_utility)
+    # Write to YAML so ROS 2 can read it
+    write_params_yaml(params_dict)
 
-    # 3. Clean up old map files so we don't evaluate the previous run
+    # Clean up old map files so we don't evaluate the previous run
     for output_path in (MAP_PATH, MISSION_STATS_PATH):
         output_path.unlink(missing_ok=True)
 
-    # 4. Launch the ROS 2 system
-    # Chain the sourcing commands with the launch command
+    # Launch the ROS 2 system
     cmd = (
         f"source /opt/ros/jazzy/setup.bash && "
         f"source {ROS_WORKSPACE}/install/setup.bash && "
@@ -54,7 +64,6 @@ def objective(trial):
     )
 
     print("Launching ROS 2 stack...")
-    # preexec_fn=os.setsid creates a new process group so we can kill ALL child nodes cleanly
     process = subprocess.Popen(
         cmd,
         shell=True,
@@ -62,7 +71,7 @@ def objective(trial):
         preexec_fn=os.setsid
     )
 
-    # 5. Wait for the mission to finish (Timeout after 300 seconds)
+    # Wait for the mission to finish (Timeout after 300 seconds)
     timeout = 300 
     start_time = time.time()
     mission_success = False
@@ -73,65 +82,57 @@ def objective(trial):
             break
         time.sleep(2.0)
 
-    # 6. Kill the ENTIRE process group cleanly
+    # Kill the ENTIRE process group cleanly
     print("Terminating simulation run...")
     try:
-        # Send SIGINT to the entire process group (bash + ros2 launch + nodes)
         os.killpg(os.getpgid(process.pid), signal.SIGINT)
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        # Force kill if any node hangs on shutdown
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         process.wait()
     except ProcessLookupError:
-        pass # Process already exited
+        pass 
 
-    time.sleep(3.0) # Settle simulation before the next trial
-    # The benchmark logger saves partial results during graceful shutdown.
+    time.sleep(3.0) 
     mission_success = mission_success or MISSION_STATS_PATH.exists()
 
-    # 7. Evaluate Fitness
+    # Evaluate Fitness
     if not mission_success:
         print("Trial timed out before results were saved. Penalizing heavily.")
-        return 0.0, 999.0 # 0% coverage, 999m distance
+        return 0.0, 999.0 
 
-    # Read distance from the logger's text file
     total_distance = 999.0
     with MISSION_STATS_PATH.open() as f:
         for line in f:
             if "Total Distance Traveled:" in line:
                 total_distance = float(line.split(":")[1].replace("meters", "").strip())
 
-    # Run the evaluator in Headless Mode (returns floats instead of opening GUI)
-    # Make sure to update your evaluate_map_accuracy to return (coverage_percentage, rmse)
     coverage, rmse = evaluate_map_accuracy(headless=True)
     
-    # If RMSE is terrible (> 0.4m), penalize the coverage heavily so Optuna learns not to do this
     if rmse > 0.4:
         coverage = coverage * 0.5 
 
     print(f"Trial {trial.number} Results -> Coverage: {coverage:.2f}%, Distance: {total_distance:.2f}m")
-    
-    # Return Multi-Objective: Maximize Coverage, Minimize Distance
     return coverage, total_distance
 
 
 if __name__ == "__main__":
-    # Define the name of the database file and the study name
     study_name = "auv_nbv_optimization"
-    storage_name = "sqlite:///optuna_auv_study.db"
     
-    # Create or load the study using the SQLite database
-    study = optuna.create_study(
-        study_name=study_name, 
-        storage=storage_name, 
-        directions=["maximize", "minimize"], 
-        load_if_exists=True  # Resumes where it left off if you restart the script
+    # Robust storage with a 20-second timeout queue to prevent SQLite locks
+    storage = optuna.storages.RDBStorage(
+        url="sqlite:///optuna_auv_study.db",
+        engine_kwargs={"connect_args": {"timeout": 20.0}}
     )
     
-    print(f"\nOptimization results will be saved to: {storage_name}")
+    study = optuna.create_study(
+        study_name=study_name, 
+        storage=storage, 
+        directions=["maximize", "minimize"], 
+        load_if_exists=True 
+    )
     
-    # Run 60 trials
+    print(f"\nOptimization results will be saved to: sqlite:///optuna_auv_study.db")
     study.optimize(objective, n_trials=60)
     
     print("\n=======================================")
@@ -141,7 +142,6 @@ if __name__ == "__main__":
         print(f"Trial {trial.number}: Coverage {trial.values[0]:.2f}%, Distance {trial.values[1]:.2f}m")
         print(f"  Params: {trial.params}")
         
-    # Optional: You can also export the final results to a CSV
     import pandas as pd
     df = study.trials_dataframe()
     df.to_csv("optuna_results_summary.csv")

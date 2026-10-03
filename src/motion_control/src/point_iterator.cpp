@@ -89,6 +89,7 @@ private:
         waypoints_.clear();
         std::vector<double> new_wp(msg->data.begin(), msg->data.end());
         waypoints_.push_back(new_wp);
+        timer_callback();
         RCLCPP_INFO(this->get_logger(), "Published 1 waypoints (from object/detected).");
     }
 
@@ -111,6 +112,8 @@ private:
         if (!wps.empty()) {
             waypoints_ = wps;
             RCLCPP_INFO(this->get_logger(), "Received %zu segmentation waypoints.", wps.size());
+            // Send the new route now: the vehicle keeps moving between timer ticks.
+            timer_callback();
         }
     }
 

@@ -1,5 +1,6 @@
 import math
 import time
+from threading import Lock
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +8,8 @@ import pyoctomap
 import rclpy
 from cv_bridge import CvBridge
 from nav_msgs.msg import Odometry
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import Image, MagneticField
 from std_msgs.msg import Bool, Float32MultiArray
@@ -14,13 +17,17 @@ from collections import deque
 
 from benchmark_evaluator.midrun_logger import MidrunLogger
 
-from .get_NBV import calculate_nbv_waypoints
+from .get_NBV import DEFAULT_NBV_PARAMETERS, calculate_nbv_waypoints
 from .route_planning import (
     generate_smooth_trajectory,
     inflate_occupied,
     path_is_collision_free,
     plan_multi_waypoint_route,
     resample_trajectory_by_distance,
+    reconnect_trajectory,
+)
+from .trajectory_optimization import (
+    continuity_cost, estimate_velocity, optimize_trajectory,
 )
 
 
@@ -53,7 +60,41 @@ class NBVUtilityNode(Node):
             'results_dir', 'results').value
         self.use_incremental_map_cache = self.declare_parameter(
             'use_incremental_map_cache', True).value
+        self.nbv_parameters = {
+            name: self.declare_parameter(
+                f'nbv_{name}', default).value
+            for name, default in DEFAULT_NBV_PARAMETERS.items()
+            if name != 'z_min_target'
+        }
+        self.nbv_parameters['z_min_target'] = self.z_min_target
+        self.astar_max_steps = self.declare_parameter(
+            'astar_max_steps', 50000).value
+        self.spline_smoothing = self.declare_parameter(
+            'spline_smoothing', 2.0).value
+        self.collision_check_spacing_factor = self.declare_parameter(
+            'collision_check_spacing_factor', 0.5).value
+        self.arrival_target_radius = self.declare_parameter(
+            'arrival_target_radius', 1.5).value
+        self.optimize_motion = self.declare_parameter(
+            'trajectory_optimization_enabled', True).value
+        self.velocity_history_window = self.declare_parameter(
+            'velocity_history_window', 1.0).value
+        self.trajectory_history_window = self.declare_parameter(
+            'trajectory_history_window', 5.0).value
+        self.motion_cost_parameters = {
+            name: self.declare_parameter(f'trajectory_{name}', default).value
+            for name, default in {
+                'continuity_weight': 8.0, 'reversal_weight': 4.0,
+                'history_weight': 2.0, 'history_radius': 0.5,
+            }.items()
+        }
+        self.optimizer_max_deviation = self.declare_parameter(
+            'trajectory_max_deviation', 0.5).value
+        self.optimizer_max_iterations = self.declare_parameter(
+            'trajectory_optimizer_max_iterations', 40).value
 
+        self.state_lock = Lock()
+        self.state_callbacks = MutuallyExclusiveCallbackGroup()
         self.bridge = CvBridge()
         self.position = np.zeros(3, dtype=np.float64)
         self.yaw = 0.0
@@ -87,6 +128,7 @@ class NBVUtilityNode(Node):
         self.telemetry = MidrunLogger(self.results_dir, prefix='planner')
         self.failed_plan_count = 0
         self.observation_history = []
+        self.blacklisted_targets = []
 
         qos = rclpy.qos.QoSProfile(depth=10)
         qos.reliability = rclpy.qos.QoSReliabilityPolicy.BEST_EFFORT
@@ -94,10 +136,14 @@ class NBVUtilityNode(Node):
             Image, 'holocean/depth/image_raw', self.depth_callback, qos)
         self.create_subscription(
             Image, 'holocean/cameraDown/image_raw', self.rgb_callback, qos)
+        state_qos = rclpy.qos.QoSProfile(depth=1)
+        state_qos.reliability = rclpy.qos.QoSReliabilityPolicy.BEST_EFFORT
         self.create_subscription(
-            Odometry, 'holocean/odom', self.odom_callback, qos)
+            Odometry, 'holocean/odom', self.odom_callback, state_qos,
+            callback_group=self.state_callbacks)
         self.create_subscription(
-            MagneticField, 'holocean/mag', self.mag_callback, qos)
+            MagneticField, 'holocean/mag', self.mag_callback, state_qos,
+            callback_group=self.state_callbacks)
         self.create_subscription(
             Bool, '/planner/request_nbv', self.request_nbv_callback, 1)
 
@@ -117,8 +163,18 @@ class NBVUtilityNode(Node):
             self.get_logger().info('Received manual NBV request from PathPlanner. Forcing immediate replan!')
             self.force_replan = True
 
+    def _motion_snapshot(self):
+        """Copy a consistent state without locking the expensive planning work."""
+        with self.state_lock:
+            return self.position.copy(), self.yaw, list(self.odom_history)
+
     def odom_callback(self, msg):
-        """Update the vehicle pose from odometry."""
+        """Keep odometry updating while the default group runs planning."""
+        with self.state_lock:
+            self._update_odometry(msg)
+
+    def _update_odometry(self, msg):
+        """Update the vehicle pose with state_lock held."""
         position = msg.pose.pose.position
         if abs(position.x) < 0.01 and abs(position.y) < 0.01:
             return
@@ -141,6 +197,10 @@ class NBVUtilityNode(Node):
         
         # NEW: Save this exact state with its timestamp into the history buffer
         msg_time = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if self.odom_history and msg_time < self.odom_history[-1][0]:
+            self.odom_history.clear()  # Simulator clock reset: discard old motion.
+        if self.odom_history and msg_time == self.odom_history[-1][0]:
+            return
         self.odom_history.append((
             msg_time, 
             np.copy(self.position), 
@@ -151,10 +211,11 @@ class NBVUtilityNode(Node):
 
     def mag_callback(self, msg):
         """Use the magnetometer heading when it is available."""
-        self.yaw = math.atan2(
-            msg.magnetic_field.x, msg.magnetic_field.y) - math.pi / 2.0
-        if self.yaw < -math.pi:
-            self.yaw += 2.0 * math.pi
+        with self.state_lock:
+            self.yaw = math.atan2(
+                msg.magnetic_field.x, msg.magnetic_field.y) - math.pi / 2.0
+            if self.yaw < -math.pi:
+                self.yaw += 2.0 * math.pi
 
     def rgb_callback(self, msg):
         """Record that the camera stream is available."""
@@ -167,14 +228,15 @@ class NBVUtilityNode(Node):
             msg, desired_encoding='passthrough')
         self.depth_sequence += 1
         
-        if len(self.odom_history) == 0:
+        _, _, history = self._motion_snapshot()
+        if len(history) == 0:
             return
             
         # Get the time the original image was taken (passed through by obstacleAvoidance)
         depth_time = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         
         # Search the history buffer for the odometry closest to the depth timestamp
-        closest_odom = min(self.odom_history, key=lambda x: abs(x[0] - depth_time))
+        closest_odom = min(history, key=lambda x: abs(x[0] - depth_time))
         
         # If the closest match is within 0.1 seconds, use it! 
         if abs(closest_odom[0] - depth_time) < 0.1:
@@ -191,6 +253,9 @@ class NBVUtilityNode(Node):
                 self.latched_yaw)
         else:
             self.get_logger().warning("Depth map timestamp is too far! Closest odometry is %.3f seconds away. Using the most recent odometry instead." % (abs(closest_odom[0] - depth_time)))
+            latest = history[-1]
+            self.latched_position = latest[1].copy()
+            self.latched_roll, self.latched_pitch, self.latched_yaw = latest[2:]
 
     def _depth_points(self, depth_frame):
         """Project a depth image into the vehicle world frame."""
@@ -254,7 +319,7 @@ class NBVUtilityNode(Node):
             self.occupied_voxels.update(new_voxels)
             self.pending_occupied_voxels.update(new_voxels)
             
-        sensor_origin = self.position + self.camera_offset
+        sensor_origin = self.latched_position + self.camera_offset
         self.octree.insertPointCloud(
             points.astype(np.float64),
             sensor_origin=sensor_origin.astype(np.float64),
@@ -313,7 +378,6 @@ class NBVUtilityNode(Node):
 
     def _plan_and_publish(self, candidates, occupied):
         """Run A*, smooth its route, and publish only a safe trajectory."""
-        self.selected_targets = []
         valid_candidates = [
             candidate for candidate in candidates
             if candidate['utility'] >= self.min_utility
@@ -327,17 +391,35 @@ class NBVUtilityNode(Node):
             for candidate in valid_candidates
         ]
         route_started = time.perf_counter()
+        position, yaw, history = self._motion_snapshot()
+        velocity = estimate_velocity(
+            history, float(self.velocity_history_window))
+        latest_time = history[-1][0] if history else 0.0
+        recent_positions = [sample[1] + self.camera_offset
+                            for sample in history
+                            if 0.0 <= latest_time - sample[0]
+                            <= float(self.trajectory_history_window)]
+        if len(recent_positions) > 64:
+            indices = np.linspace(0, len(recent_positions) - 1, 64).astype(int)
+            recent_positions = [recent_positions[index] for index in indices]
         route, targets = plan_multi_waypoint_route(
-            self.position + self.camera_offset,
+            position + self.camera_offset,
             route_candidates,
             occupied,
             self.resolution,
+            astar_max_steps=int(self.astar_max_steps),
+            current_velocity=velocity if self.optimize_motion else None,
+            reversal_weight=(float(self.motion_cost_parameters['reversal_weight'])
+                             if self.optimize_motion else 0.0),
         )
         self.telemetry.record_stage(
             'route_search', (time.perf_counter() - route_started) * 1000.0,
             iteration=self.iteration)
         if len(route) == 0 or not path_is_collision_free(
-                route, occupied, self.resolution):
+            route,
+            occupied,
+            self.resolution,
+            self.collision_check_spacing_factor):
             self.get_logger().warning('A* produced no collision-free route')
             return False
 
@@ -346,23 +428,29 @@ class NBVUtilityNode(Node):
             route,
             targets,
             num_points=int(self.trajectory_points),
+            smoothing=float(self.spline_smoothing),
             sampling_spacing=float(self.waypoint_spacing),
         )
-        if len(trajectory) == 0:
-            trajectory = np.column_stack((
-                route,
-                np.arctan2(
-                    targets[:, 1] - route[:, 1],
-                    targets[:, 0] - route[:, 0]),
-                ),
-            )
-        trajectory = resample_trajectory_by_distance(
-            trajectory,
-            float(self.waypoint_spacing),
-            max_points=int(self.trajectory_points),
-        )
-        if not path_is_collision_free(
-                trajectory[:, :3], occupied, self.resolution):
+        raw_trajectory = np.column_stack((route, np.arctan2(
+            targets[:, 1] - route[:, 1], targets[:, 0] - route[:, 0])))
+        safe_options = []
+        for option in (trajectory, raw_trajectory):
+            if len(option) == 0:
+                continue
+            option = option.copy()
+            option[0, :3] = route[0]
+            option[-1, :3] = route[-1]
+            if self.optimize_motion:
+                option[:, 3] = np.unwrap(np.r_[yaw, option[:, 3]])[1:]
+                option[0, 3] = yaw
+            option = resample_trajectory_by_distance(
+                option, float(self.waypoint_spacing),
+                max_points=int(self.trajectory_points))
+            if path_is_collision_free(
+                    option[:, :3], occupied, self.resolution,
+                    self.collision_check_spacing_factor):
+                safe_options.append(option)
+        if not safe_options:
             self.get_logger().warning(
                 'Resampled spline intersects the collision boundary; '
                 'route rejected')
@@ -371,12 +459,39 @@ class NBVUtilityNode(Node):
                 (time.perf_counter() - trajectory_started) * 1000.0,
                 iteration=self.iteration, details='rejected')
             return False
+        trajectory = min(safe_options, key=lambda option: continuity_cost(
+            option, velocity, recent_positions, **self.motion_cost_parameters)
+        ) if self.optimize_motion else safe_options[0]
+        if self.optimize_motion:
+            before_cost = continuity_cost(
+                trajectory, velocity, recent_positions, **self.motion_cost_parameters)
+            trajectory = optimize_trajectory(
+                trajectory, position + self.camera_offset, yaw, velocity,
+                occupied, self.resolution, recent_positions,
+                **self.motion_cost_parameters,
+                max_deviation=float(self.optimizer_max_deviation),
+                max_iterations=int(self.optimizer_max_iterations),
+                collision_spacing_factor=float(self.collision_check_spacing_factor))
+            after_cost = continuity_cost(
+                trajectory, velocity, recent_positions, **self.motion_cost_parameters)
+            self.get_logger().info(
+                f'Motion optimization: speed={np.linalg.norm(velocity):.2f} m/s, '
+                f'continuity cost={before_cost:.2f} -> {after_cost:.2f}')
         self.telemetry.record_stage(
             'trajectory_generation_and_validation',
             (time.perf_counter() - trajectory_started) * 1000.0,
             iteration=self.iteration)
             
         publish_started = time.perf_counter()
+        latest_position, latest_yaw, _ = self._motion_snapshot()
+        trajectory = reconnect_trajectory(
+            trajectory, latest_position + self.camera_offset, latest_yaw,
+            occupied, self.resolution, self.collision_check_spacing_factor)
+        if len(trajectory) == 0:
+            self.force_replan = True
+            self.get_logger().warning(
+                'Vehicle moved during planning; no safe entry to the new route. '
+                'Requesting a fresh plan.')
         success = self._publish_trajectory(trajectory)
         self.telemetry.record_stage(
             'trajectory_publish', (time.perf_counter() - publish_started) * 1000.0,
@@ -392,7 +507,10 @@ class NBVUtilityNode(Node):
         if len(self.active_trajectory) == 0:
             return True
         return path_is_collision_free(
-            self.active_trajectory[:, :3], occupied, self.resolution)
+            self.active_trajectory[:, :3],
+            occupied,
+            self.resolution,
+            self.collision_check_spacing_factor)
 
     def timer_callback(self):
         """Update the map and periodically publish the next viewpoints."""
@@ -454,11 +572,26 @@ class NBVUtilityNode(Node):
             self.active_trajectory = np.empty((0, 4), dtype=np.float64)
             self.get_logger().warning('🚨 Active trajectory collided with newly mapped space; forcing replan!')
 
+
+        arrived_at_target = False
+        if self.selected_targets:
+            for target in self.selected_targets:
+                # Calculate absolute distance to the NBV centroid
+                dist = np.linalg.norm(self.position - target)
+                
+                # Use a 1.5m radius because B-splines smooth out corners, 
+                # so the AUV might not hit the exact dead-center millimeter.
+                if dist < self.arrival_target_radius:
+                    self.get_logger().info(f'📍 Arrived at NBV Target (Distance: {dist:.2f}m). Forcing instant replan!')
+                    arrived_at_target = True
+                    break
+
         # 3. PLANNING PHASE
         should_plan = (
             self.iteration % max(1, int(self.frame_period)) == 0
             or route_blocked
             or self.force_replan
+            or arrived_at_target
         )
         
         if should_plan:
@@ -471,16 +604,18 @@ class NBVUtilityNode(Node):
                 'octomap_save', (time.perf_counter() - stage_started) * 1000.0,
                 iteration=self.iteration)
             
-            heading = np.array([math.cos(self.yaw), math.sin(self.yaw), 0.0])
+            nbv_position, nbv_yaw, _ = self._motion_snapshot()
+            heading = np.array([math.cos(nbv_yaw), math.sin(nbv_yaw), 0.0])
             
             nbv_started = time.perf_counter()
             try:
                 self.get_logger().info('Calculating NBV waypoints...')
                 candidates = calculate_nbv_waypoints(
                     occupied_points,
-                    self.position + self.camera_offset,
+                    nbv_position + self.camera_offset,
                     heading,
-                    self.observation_history
+                    self.observation_history,
+                    self.nbv_parameters,
                 )
                 self.get_logger().info(f'Found {len(candidates)} valid NBV targets.')
             except (ValueError, RuntimeError) as error:
@@ -491,26 +626,41 @@ class NBVUtilityNode(Node):
                 iteration=self.iteration,
                 details=f'candidates={len(candidates)}')
 
-            published = self._plan_and_publish(candidates, collision_voxels)
+            safe_candidates = []
+            for cand in candidates:
+                # If this target is within 0.5m of a known bad coordinate, drop it
+                is_banned = any(np.linalg.norm(cand['target'] - bt) < 0.5 for bt in self.blacklisted_targets)
+                if not is_banned:
+                    safe_candidates.append(cand)
+
+            if len(safe_candidates) < len(candidates):
+                self.get_logger().info(f"Dropped {len(candidates) - len(safe_candidates)} blacklisted targets.")
+
+            # Pass the SAFE candidates to the planner
+            published = self._plan_and_publish(safe_candidates, collision_voxels)
+
 
             if published:
                 self.failed_plan_count = 0  # Reset counter on success
             else:
-                self.failed_plan_count += 1
-                if len(candidates) > 0:
-                    self.get_logger().warning(f'Spline generation failed. Strike {self.failed_plan_count}/3')
+                if self.force_replan:
+                    pass  # A stale entry is not evidence that the target is bad.
+                elif len(safe_candidates) > 0:
+                    self.get_logger().warning('Spline rejected. Blacklisting top target to prevent infinite loop.')
+                    # Hard-ban the physical coordinate of the culprit so it never gets passed to A* again
+                    self.blacklisted_targets.append(np.copy(safe_candidates[0]['target']))
                 else:
+                    self.failed_plan_count += 1
                     self.get_logger().warning(f'No frontiers found. Strike {self.failed_plan_count}/3')
 
-            # If we fail 3 times in a row, end the mission regardless of started_mapping
             if self.failed_plan_count >= 3:
                 self.finished_mapping = True
                 self.finished_pub.publish(Bool(data=True))
                 
                 self.get_logger().info('Flushing final RAM state to OctoMap file...')
                 self.octree.write(self.map_path)
-                self.get_logger().info('✅ Mapping finished. Reached maximum consecutive failures (Pipe end or No geometry).')
-            
+                self.get_logger().info('✅ Mapping finished. Explored all accessible frontiers.')
+                
             # CRITICAL FIX: Only end the mission if there are literally zero frontiers left.
             # if len(candidates) == 0 and self.started_mapping:
             #     self.finished_mapping = True
@@ -562,9 +712,12 @@ def main(args=None):
     """Run the Python NBV utility node."""
     rclpy.init(args=args)
     node = NBVUtilityNode()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     finally:
+        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 

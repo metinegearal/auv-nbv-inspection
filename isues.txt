@@ -1,0 +1,49 @@
+Issue 1: [Docs] Comprehensive Software Architecture & Data Flow Documentation
+
+Description:
+The AUV exploration pipeline has evolved significantly beyond its initial implementation. The integration of the Python NBVUtilityNode with the C++ PathPlanner, the introduction of the ROS 2 Demand-Trigger architecture (/planner/request_nbv), the KDTree local collision checks, and the physical coordinate blacklisting system have created a highly complex, asynchronous state machine.
+
+To maintain control over the architecture and onboard future contributors, we need a centralized documentation hub that visually and technically maps out the data flow, mathematical pipelines, and failure-handling logic.
+
+Tasks & Objectives:
+
+    [ ] Node Graph & Topic Map: Document all active ROS 2 nodes, custom topics, and message types (e.g., std_msgs/Bool for demand triggers, Float32MultiArray for waypoints).
+
+    [ ] Sequence Diagram (The Demand Loop): Map the exact timing and trigger sequence between the AUV hitting a waypoint, C++ demanding a route, Python generating the OctoMap spline, and the AUV receiving the new trajectory.
+
+    [ ] Algorithmic Pipeline Breakdown: Document the 4-phase NBV math logic (get_NBV.py), specifically detailing the PCA complexity scoring, Information Gain vs. Kinematic Cost normalization, and the FOV breadcrumb memory (observation_history).
+
+    [ ] Failsafe Documentation: Explicitly map out the Strikeout System and the Physical Blacklist logic so developers understand how the system escapes infinite routing loops and gracefully terminates the mission.
+
+Acceptance Criteria:
+
+    Documentation is committed as Markdown (.md) files in a /docs directory.
+
+    Architecture diagrams (Mermaid.js or similar) are included and render correctly on GitHub.
+
+    All configurable parameters (e.g., MIN_RAW_GAIN, collision_radius, frame_period) are listed with their baseline values and tuning effects.
+
+Issue 2: [Simulation] Design Comprehensive 3D Benchmark Map for AUV Exploration
+
+Description:
+Current benchmark data reveals that while the NBV algorithm dominates in accuracy (0.0643m Mean Error), it struggles with global surface coverage (72.38%) compared to dumb lawnmower patterns. Furthermore, previous environments triggered physical trapping states (e.g., the "blue rectangle" blindspot collisions).
+
+To rigorously test our algorithmic improvements (volume weighting, blacklisting, and sensor FOV memory), we need a custom, highly challenging underwater infrastructure map built in Unreal Engine for the HoloOcean simulator. This map must physically punish bad routing and reward true 3D volumetric awareness.
+
+Tasks & Objectives:
+
+    [ ] Complex Geometry Construction: Build an Unreal Engine level containing challenging subsea structures: multi-layered pipe manifolds, T-junctions, varying verticality, and overhanging obstacles that require 6-DOF navigation to fully inspect.
+
+    [ ] Trap Zones: Intentionally design dead-ends and narrow corridors to stress-test the A* planner's local KDTree collision checking and the physical target blacklisting system.
+
+    [ ] Ground-Truth Calibration: Calculate and establish the absolute total surface area of the target objects in the map to ensure the Python benchmark script accurately reports the true % Surface Coverage metric.
+
+    [ ] Baseline Runs: Execute both the "Long-Side" and "Short-Side" lawnmower patterns on the new map and log their baseline stats (Accuracy, Coverage, Distance) into the benchmark CSV for future NBV comparisons.
+
+Acceptance Criteria:
+
+    The new Unreal Engine .umap file and associated assets are committed or linked via LFS.
+
+    The HoloOcean configuration JSON is updated to support loading the new environment.
+
+    The map successfully loads in headless simulation mode without throwing collision mesh errors.

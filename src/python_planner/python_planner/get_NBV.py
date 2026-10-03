@@ -6,6 +6,34 @@ from scipy.spatial import KDTree
 
 LOGGER = get_logger('nbv_waypoint_calculator')
 
+DEFAULT_NBV_PARAMETERS = {
+    'z_min_target': -31.5,
+    'pca_neighbors': 20,
+    'frontier_neighbors': 40,
+    'frontier_angle_threshold_deg': 130.0,
+    'cluster_fov_radius': 1.0,
+    'cluster_max_angle_deg': 45.0,
+    'cluster_min_samples': 5,
+    'voxel_downsample_size': 0.25,
+    'outlier_neighbors': 15,
+    'outlier_std_ratio': 1.5,
+    'normal_radius': 0.4,
+    'normal_max_neighbors': 30,
+    'min_raw_gain': 0.5,
+    'standoff': 1.5,
+    'polar_angles_deg': [15.0, 30.0],
+    'azimuth_steps': 8,
+    'visited_min_distance': 0.1,
+    'visited_max_distance': 3.0,
+    'visited_yaw_threshold_deg': 30.0,
+    'complexity_weight': 15.0,
+    'distance_weight': 1.0,
+    'rotation_weight': 0.5,
+    'collision_weight': 2.0,
+    'collision_distance_threshold': 0.8,
+    'collision_distance_offset': 0.1,
+}
+
 # ==========================================
 # NBV MATHEMATICAL HELPER FUNCTIONS
 # ==========================================
@@ -127,7 +155,11 @@ def cluster_frontiers(points, normals, frontier_indices, fov_radius=1.0, max_ang
 
     return clusters
 
-def generate_cone_viewpoints(target_pt, normal, standoff=1.5, polar_angles_deg=[15, 30], azimuth_steps=8):
+def generate_cone_viewpoints(
+        target_pt, normal, standoff=1.5, polar_angles_deg=None,
+        azimuth_steps=8):
+    if polar_angles_deg is None:
+        polar_angles_deg = [15, 30]
     normal = normal / np.linalg.norm(normal)
     u = np.cross(normal, np.array([0, 0, 1]))
     if np.linalg.norm(u) < 1e-4:
@@ -162,7 +194,10 @@ def evaluate_viewpoint(vp_pos, cluster_pts, cluster_normals, cluster_complexitie
         total_score += (cos_theta * info_value)
     return total_score
 
-def calculate_kinematic_cost(auv_pos, auv_heading, vp_pos, target_pos, pcd_tree):
+def calculate_kinematic_cost(
+    auv_pos, auv_heading, vp_pos, target_pos, pcd_tree,
+    distance_weight=1.0, rotation_weight=0.5, collision_weight=2.0,
+    collision_distance_threshold=0.8, collision_distance_offset=0.1):
     travel_vec = vp_pos - auv_pos
     dist = np.linalg.norm(travel_vec)
     
@@ -185,10 +220,13 @@ def calculate_kinematic_cost(auv_pos, auv_heading, vp_pos, target_pos, pcd_tree)
         
     total_rotation = turn1_angle + turn2_angle
     nearest_dist, _ = pcd_tree.query(vp_pos, k=1)
-    collision_risk = 1.0 / (nearest_dist + 0.1) if nearest_dist < 0.8 else 0.0
-    
-    w_dist, w_rot, w_col = 1.0, 0.5, 2.0
-    raw_cost = (w_dist * dist) + (w_rot * total_rotation) + (w_col * collision_risk)
+    collision_risk = (
+        1.0 / (nearest_dist + collision_distance_offset)
+        if nearest_dist < collision_distance_threshold else 0.0)
+    raw_cost = (
+        (distance_weight * dist)
+        + (rotation_weight * total_rotation)
+        + (collision_weight * collision_risk))
     return raw_cost
 
 def normalize_array(arr):
@@ -201,32 +239,42 @@ def normalize_array(arr):
 # ==========================================
 # MAIN NBV PIPELINE FUNCTION
 # ==========================================
-def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, observation_history=[]):
+def calculate_nbv_waypoints(
+    occupied_points, auv_position, auv_heading, observation_history=None,
+    parameters=None):
     """
     Takes raw OctoMap occupied points and returns a sorted list of the best 
     Next-Best-View (NBV) waypoints for the AUV trajectory planner.
     """
     LOGGER.info('Calculating NBV waypoints...')
+    parameters = {**DEFAULT_NBV_PARAMETERS, **(parameters or {})}
+    if observation_history is None:
+        observation_history = []
     points_raw = np.asarray(occupied_points)
     if len(points_raw) == 0:
         return []
         
     # 1. Pre-Processing (Filter seabed & clean noise)
-    z_min_target = -31.5
+    z_min_target = float(parameters['z_min_target'])
     pipe_points = points_raw[points_raw[:, 2] > z_min_target]
     if len(pipe_points) == 0:
         return []
         
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pipe_points)
-    pcd = pcd.voxel_down_sample(voxel_size=0.25)
-    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=15, std_ratio=1.5)
+    pcd = pcd.voxel_down_sample(
+        voxel_size=float(parameters['voxel_downsample_size']))
+    pcd, _ = pcd.remove_statistical_outlier(
+        nb_neighbors=int(parameters['outlier_neighbors']),
+        std_ratio=float(parameters['outlier_std_ratio']))
     
     if len(pcd.points) < 40:
         return []
         
     # Normal generation (oriented towards AUV)
-    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.4, max_nn=30))
+    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
+        radius=float(parameters['normal_radius']),
+        max_nn=int(parameters['normal_max_neighbors'])))
     pcd.orient_normals_towards_camera_location(auv_position)
     
     cleaned_points = np.asarray(pcd.points)
@@ -234,16 +282,26 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, observat
     pcd_tree = KDTree(cleaned_points)
     
     # 2. Mathematical Pipeline
-    complexities = calculate_pca_complexity(pcd)
-    frontier_indices = detect_frontiers(pcd, k=40, angle_threshold_deg=130)
-    clusters = cluster_frontiers(cleaned_points, normals, frontier_indices, fov_radius=1.0, max_angle_deg=45)
+    complexities = calculate_pca_complexity(
+        pcd, k=int(parameters['pca_neighbors']))
+    frontier_indices = detect_frontiers(
+        pcd,
+        k=int(parameters['frontier_neighbors']),
+        angle_threshold_deg=float(parameters['frontier_angle_threshold_deg']))
+    clusters = cluster_frontiers(
+        cleaned_points,
+        normals,
+        frontier_indices,
+        fov_radius=float(parameters['cluster_fov_radius']),
+        max_angle_deg=float(parameters['cluster_max_angle_deg']),
+        min_samples=int(parameters['cluster_min_samples']))
     
     if not clusters:
         return []
 
     # 3. Candidate Generation & Raw Evaluation
     all_candidates = []
-    MIN_RAW_GAIN = 0.5  # Lowered threshold to prevent throwing away valid targets
+    min_raw_gain = float(parameters['min_raw_gain'])
     
     for cluster in clusters:
         already_visited = False
@@ -252,7 +310,8 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, observat
             dist = np.linalg.norm(vec)
             
             # 1. Was it within the camera's physical range?
-            if 0.1 < dist < 3.0:
+            if (parameters['visited_min_distance'] < dist
+                    < parameters['visited_max_distance']):
                 # 2. Was the AUV physically facing it?
                 angle_to_target = np.arctan2(vec[1], vec[0])
                 
@@ -262,7 +321,8 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, observat
                     np.cos(angle_to_target - obs_yaw)
                 ))
                 
-                if yaw_diff < np.radians(30):
+                if yaw_diff < np.radians(
+                    parameters['visited_yaw_threshold_deg']):
                     LOGGER.info(
                         f"Cluster {cluster['id']} was already observed "
                         f"(distance: {dist:.2f} m, "
@@ -286,18 +346,33 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading, observat
         # THE MISSING MATH BLOCK: Generate & evaluate viewpoints
         # =========================================================
         c_complexities = complexities[cluster['global_indices']]
-        candidates = generate_cone_viewpoints(cluster['centroid'], cluster['avg_normal'], standoff=2.0)
+        candidates = generate_cone_viewpoints(
+            cluster['centroid'],
+            cluster['avg_normal'],
+            standoff=float(parameters['standoff']),
+            polar_angles_deg=parameters['polar_angles_deg'],
+            azimuth_steps=int(parameters['azimuth_steps']))
         
         for cand in candidates:
             gain = evaluate_viewpoint(cand['position'], cluster['points'], cluster['normals'], c_complexities)
             
             # Apply the threshold
-            if gain < MIN_RAW_GAIN:
+            if gain < min_raw_gain:
                 continue
                 
             cost = calculate_kinematic_cost(
-                auv_position, auv_heading, cand['position'], cluster['centroid'], pcd_tree
-            )
+                auv_position,
+                auv_heading,
+                cand['position'],
+                cluster['centroid'],
+                pcd_tree,
+                distance_weight=float(parameters['distance_weight']),
+                rotation_weight=float(parameters['rotation_weight']),
+                collision_weight=float(parameters['collision_weight']),
+                collision_distance_threshold=float(
+                    parameters['collision_distance_threshold']),
+                collision_distance_offset=float(
+                    parameters['collision_distance_offset']))
             
             all_candidates.append({
                 'cluster_id': cluster['id'],

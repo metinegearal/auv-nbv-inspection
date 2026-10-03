@@ -4,3 +4,7 @@ log/
 *.pth
 results/*.csv
 PR_**.md
+AGENTS.md
+**_dummy**
+issue.txt
+temp_**
