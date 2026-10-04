@@ -9,10 +9,12 @@ def generate_launch_description():
     # 1. Set up the default paths (used if no arguments are passed)
     bringup_dir = get_package_share_directory('bringup')
     default_config_file = os.path.join(bringup_dir, 'config', 'params.yaml')
+    default_nbv_config_file = os.path.join(bringup_dir, 'config', 'nbv_params.yaml')
     default_holo_config_file = os.path.join(bringup_dir, 'config', 'holoocean_config.json')
 
     # 2. Create LaunchConfigurations to hold the runtime values
     params_file = LaunchConfiguration('params_file')
+    nbv_params_file = LaunchConfiguration('nbv_params_file')
     holo_config = LaunchConfiguration('holo_config_file')
 
     # 3. Declare the launch arguments so they are exposed to the CLI
@@ -27,10 +29,16 @@ def generate_launch_description():
         default_value=default_holo_config_file,
         description='Full path to the HoloOcean configuration JSON file to use'
     )
+    declare_nbv_params_file_cmd = DeclareLaunchArgument(
+        'nbv_params_file',
+        default_value=default_nbv_config_file,
+        description='Full path to NBV geometry, sampling, and scoring parameters YAML'
+    )
 
     return LaunchDescription([
         # Add the declarations to the LaunchDescription first
         declare_params_file_cmd,
+        declare_nbv_params_file_cmd,
         declare_holo_config_cmd,
         
         # Now pass the LaunchConfigurations into the nodes instead of the hardcoded strings
@@ -62,7 +70,8 @@ def generate_launch_description():
             package='python_planner',
             executable='planner_node',
             name='planner_node',
-            parameters=[params_file]
+            # Keep legacy combined/custom params_file overrides authoritative.
+            parameters=[nbv_params_file, params_file]
         ),
         Node(
             package='benchmark_evaluator',

@@ -4,46 +4,45 @@ waypoint_control_node:
     kp_dist: 0.75
     dvl_active: true
     stopping_distance: 0.4
-    initial_waypoint_x: 10.0
-    initial_waypoint_y: 10.0
-    initial_waypoint_z: 5.0
+    initial_waypoint_x: 354.0
+    initial_waypoint_y: 828.0
+    initial_waypoint_z: -298.0
+    initial_waypoint_yaw: 0.0
     max_yaw_command: 10.0
     yaw_smoothing_rate: 0.8
     min_forward_thrust: 1.0
     max_forward_thrust: 8.0
-    command_multiplier: 3.5
-
-point_extract:
-  ros__parameters:
-    look_ahead_pixels: 100
-    angle_weight: 0.5
+    command_multiplier: 5.0
 
 point_iterator:
   ros__parameters:
     camera_x: 0.35
     camera_y: 0.3875
     camera_z: -0.5
-    initial_waypoint_x: -14.0
-    initial_waypoint_y: -82.0
-    initial_waypoint_z: -29.5
+    initial_waypoint_x: 354.0
+    initial_waypoint_y: 828.0
+    initial_waypoint_z: -298.0
     initial_waypoint_yaw: 0.0
     timer_period_s: 1.0
     waypoint_reached_distance: 0.5
 
 planner_node:
   ros__parameters:
-    voxel_resolution: 0.1
-    max_depth: 4.0
+    voxel_resolution: 0.2
+    max_depth: 5.0
     min_depth: 0.5
-    z_min_target: -32.0
+    z_min_target: -300.0
     depth_stride: 4
     depth_scale: 1.0
     planning_period: 100
-    min_utility_threshold: 0.2
+    replan_on_target_arrival: true
+    min_utility_threshold: 0.1
     collision_radius: 0.3
+    # Extra clearance for the controller's 0.4 m waypoint completion tolerance.
+    collision_tracking_margin: 0.4
     trajectory_points: 300
     waypoint_spacing: 0.5
-    trajectory_optimization_enabled: true
+    trajectory_optimization_enabled: false
     velocity_history_window: 1.0
     trajectory_history_window: 5.0
     trajectory_continuity_weight: 8.0
@@ -56,40 +55,23 @@ planner_node:
     visit_radius: 0.5
     results_dir: results
     use_incremental_map_cache: true
+    # Log every NBV filter, candidate rejection, and planning result to ROS and JSONL.
+    nbv_filter_logging: true
     
-    nbv_pca_neighbors: 20
-    nbv_frontier_neighbors: 40
-    nbv_frontier_angle_threshold_deg: 130.0
-    nbv_cluster_fov_radius: 1.0
-    nbv_cluster_max_angle_deg: 45.0
-    nbv_cluster_min_samples: 5
-    nbv_voxel_downsample_size: 0.25
-    nbv_outlier_neighbors: 15
-    nbv_outlier_std_ratio: 1.5
-    nbv_normal_radius: 0.4
-    nbv_normal_max_neighbors: 30
-    nbv_min_raw_gain: 0.5
-    nbv_standoff: 1.5
-    nbv_polar_angles_deg: [15.0, 30.0]
-    nbv_azimuth_steps: 8
-    nbv_visited_min_distance: 0.1
-    nbv_visited_max_distance: 3.0
-    nbv_visited_yaw_threshold_deg: 30.0
-    nbv_complexity_weight: 15.0
-    nbv_distance_weight: 1.0
-    nbv_rotation_weight: 0.5
-    nbv_collision_weight: 2.0
-    nbv_collision_distance_threshold: 0.8
-    nbv_collision_distance_offset: 0.1
+    # NBV geometry, sampling, and scoring live in nbv_params.yaml.
     
     astar_max_steps: 50000
+    # Skip an actually failed target briefly, then allow another attempt.
+    route_blacklist_cooldown_s: 30.0
     spline_smoothing: 2.0
     collision_check_spacing_factor: 0.5
-    arrival_target_radius: 1.5
+    arrival_target_radius: 2.5
 
 run_baselines:
   ros__parameters:
     results_dir: results
+    # Draw the reference rectangles and pipes in the trajectory overview.
+    show_reference_objects: false
 
 depth_estimation:
   ros__parameters:

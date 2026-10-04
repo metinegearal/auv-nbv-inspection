@@ -49,7 +49,7 @@ public:
     this->get_parameter("max_forward_thrust", max_forward_thrust_);
     this->get_parameter("command_multiplier", command_multiplier_);
 
-    waypoint_ = {0.0, 0.0, -26.0};
+    waypoint_ = {initial_waypoint_x_, initial_waypoint_y_, initial_waypoint_z_};
     magnet_ = {0.0, 0.0, 0.0};
     obstacles_.resize(9, 0.0);
     motor_command_.resize(8, 0.0);

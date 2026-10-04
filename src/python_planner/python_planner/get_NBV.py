@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import open3d as o3d
 from rclpy.logging import get_logger
 from scipy.spatial import KDTree
@@ -7,7 +8,7 @@ from scipy.spatial import KDTree
 LOGGER = get_logger('nbv_waypoint_calculator')
 
 DEFAULT_NBV_PARAMETERS = {
-    'z_min_target': -31.5,
+    'z_min_target': -3000.0,
     'pca_neighbors': 20,
     'frontier_neighbors': 40,
     'frontier_angle_threshold_deg': 130.0,
@@ -47,55 +48,59 @@ def calculate_pca_complexity(pcd, k=20):
         
     tree = KDTree(points)
     complexities = np.zeros(n_points)
-    
-    # Cap k so we never ask for more neighbors than actually exist
-    k_actual = min(k, n_points)
-    
-    for i, pt in enumerate(points):
-        _, idxs = tree.query(pt, k=k_actual)
+    k_actual = min(int(k), n_points)
+    if k_actual < 2:
+        return complexities
+    # Batch queries and eigensolves; cap temporary storage for large maps.
+    for start in range(0, n_points, 1024):
+        _, idxs = tree.query(points[start:start + 1024], k=k_actual)
         neighbors = points[idxs]
-        centered = neighbors - np.mean(neighbors, axis=0)
-        cov = np.cov(centered.T)
-        eigenvalues = np.sort(np.linalg.eigvalsh(cov))[::-1]
-        
-        if np.sum(eigenvalues) > 0:
-            complexities[i] = eigenvalues[2] / np.sum(eigenvalues)
+        centered = neighbors - neighbors.mean(axis=1, keepdims=True)
+        covariance = np.einsum('nki,nkj->nij', centered, centered) / (k_actual - 1)
+        eigenvalues = np.linalg.eigvalsh(covariance)
+        totals = eigenvalues.sum(axis=1)
+        complexities[start:start + len(idxs)] = np.divide(
+            eigenvalues[:, 0], totals, out=np.zeros_like(totals), where=totals > 0)
     return complexities
 
 def detect_frontiers(pcd, k=40, angle_threshold_deg=130):
     points = np.asarray(pcd.points)
-    normals = np.asarray(pcd.normals)
+    normals = np.asarray(pcd.normals, dtype=np.float64)
     tree = KDTree(points)
     
     frontier_indices = []
     angle_threshold = np.radians(angle_threshold_deg)
-    
-    for i in range(len(points)):
-        pt = points[i]
-        n = normals[i]
-        _, neighbor_idxs = tree.query(pt, k=k)
-        neighbors = points[neighbor_idxs]
-        
-        u = np.cross(n, np.array([0, 0, 1]))
-        if np.linalg.norm(u) < 1e-4:
-            u = np.cross(n, np.array([0, 1, 0]))
-        u = u / np.linalg.norm(u)
-        v = np.cross(n, u)
-        
-        angles = []
-        for n_pt in neighbors:
-            vec = n_pt - pt
-            dist = np.linalg.norm(vec)
-            if dist < 1e-5: continue
-            angles.append(np.arctan2(np.dot(vec, v), np.dot(vec, u)))
-            
-        if not angles: continue
-        angles.sort()
-        angles.append(angles[0] + 2 * np.pi)
-        
-        if np.max(np.diff(angles)) > angle_threshold:
-            frontier_indices.append(i)
-            
+    if len(points) < 2:
+        return frontier_indices
+    k_actual = min(max(2, int(k)), len(points))
+    for start in range(0, len(points), 1024):
+        batch = points[start:start + 1024]
+        batch_normals = normals[start:start + 1024]
+        _, neighbor_idxs = tree.query(batch, k=k_actual)
+        vectors = points[neighbor_idxs] - batch[:, None, :]
+        u = np.cross(batch_normals, [0, 0, 1])
+        vertical = np.linalg.norm(u, axis=1) < 1e-4
+        u[vertical] = np.cross(batch_normals[vertical], [0, 1, 0])
+        u /= np.maximum(np.linalg.norm(u, axis=1, keepdims=True), 1e-12)
+        v = np.cross(batch_normals, u)
+        valid = (np.linalg.norm(vectors, axis=2) >= 1e-5) & (
+            np.linalg.norm(batch_normals, axis=1)[:, None] > 0)
+        angles = np.arctan2(np.einsum('nki,ni->nk', vectors, v),
+                            np.einsum('nki,ni->nk', vectors, u))
+        angles[~valid] = np.inf
+        angles.sort(axis=1)
+        counts = valid.sum(axis=1)
+        has_neighbors = counts > 0
+        interior = np.arange(k_actual - 1)[None, :] < (counts - 1)[:, None]
+        gaps = np.subtract(angles[:, 1:], angles[:, :-1],
+                           out=np.zeros((len(batch), k_actual - 1)), where=interior)
+        last = angles[np.arange(len(batch)), np.maximum(counts - 1, 0)]
+        wrap = np.zeros(len(batch))
+        wrap[has_neighbors] = (angles[has_neighbors, 0] + 2 * np.pi
+                               - last[has_neighbors])
+        largest = np.maximum(gaps.max(axis=1), wrap)
+        frontier_indices.extend((start + np.flatnonzero(
+            has_neighbors & (largest > angle_threshold))).tolist())
     return frontier_indices
 
 def cluster_frontiers(points, normals, frontier_indices, fov_radius=1.0, max_angle_deg=45, min_samples=5):
@@ -115,22 +120,12 @@ def cluster_frontiers(points, normals, frontier_indices, fov_radius=1.0, max_ang
         seed_pt = frontier_pts[seed_idx]
         seed_norm = frontier_norms[seed_idx]
 
-        cluster_mask = []
-        new_unassigned = []
-
-        for idx in unassigned:
-            pt = frontier_pts[idx]
-            norm = frontier_norms[idx]
-            dist = np.linalg.norm(pt - seed_pt)
-            cos_theta = np.clip(np.dot(seed_norm, norm), -1.0, 1.0)
-            angle = np.arccos(cos_theta)
-
-            if dist <= fov_radius and angle <= max_angle_rad:
-                cluster_mask.append(idx)
-            else:
-                new_unassigned.append(idx)
-
-        unassigned = new_unassigned
+        indices = np.asarray(unassigned)
+        distances = np.linalg.norm(frontier_pts[indices] - seed_pt, axis=1)
+        angles = np.arccos(np.clip(frontier_norms[indices] @ seed_norm, -1.0, 1.0))
+        accepted = (distances <= fov_radius) & (angles <= max_angle_rad)
+        cluster_mask = indices[accepted]
+        unassigned = indices[~accepted].tolist()
 
         if len(cluster_mask) < min_samples:
             continue
@@ -182,17 +177,15 @@ def generate_cone_viewpoints(
             
     return candidates
 
-def evaluate_viewpoint(vp_pos, cluster_pts, cluster_normals, cluster_complexities):
-    total_score = 0.0
-    for pt, norm, comp in zip(cluster_pts, cluster_normals, cluster_complexities):
-        ray = pt - vp_pos
-        dist = np.linalg.norm(ray)
-        if dist < 1e-4: continue
-        ray_dir = ray / dist
-        cos_theta = np.clip(np.dot(-ray_dir, norm), 0.0, 1.0)
-        info_value = 1.0 + (15.0 * comp)
-        total_score += (cos_theta * info_value)
-    return total_score
+def evaluate_viewpoint(vp_pos, cluster_pts, cluster_normals, cluster_complexities,
+                       complexity_weight=15.0):
+    rays = np.asarray(cluster_pts) - vp_pos
+    distances = np.linalg.norm(rays, axis=1)
+    valid = distances >= 1e-4
+    directions = rays[valid] / distances[valid, None]
+    cos_theta = np.clip(np.sum(-directions * np.asarray(cluster_normals)[valid],
+                               axis=1), 0.0, 1.0)
+    return float(np.sum(cos_theta * (1.0 + complexity_weight * np.asarray(cluster_complexities)[valid])))
 
 def calculate_kinematic_cost(
     auv_pos, auv_heading, vp_pos, target_pos, pcd_tree,
@@ -241,12 +234,18 @@ def normalize_array(arr):
 # ==========================================
 def calculate_nbv_waypoints(
     occupied_points, auv_position, auv_heading, observation_history=None,
-    parameters=None):
+    parameters=None, timing_callback=None):
     """
     Takes raw OctoMap occupied points and returns a sorted list of the best 
     Next-Best-View (NBV) waypoints for the AUV trajectory planner.
     """
     LOGGER.info('Calculating NBV waypoints...')
+    def timed(stage, operation):
+        started = time.perf_counter()
+        value = operation()
+        if timing_callback is not None:
+            timing_callback(stage, (time.perf_counter() - started) * 1000.0)
+        return value
     parameters = {**DEFAULT_NBV_PARAMETERS, **(parameters or {})}
     if observation_history is None:
         observation_history = []
@@ -262,83 +261,60 @@ def calculate_nbv_waypoints(
         
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pipe_points)
-    pcd = pcd.voxel_down_sample(
-        voxel_size=float(parameters['voxel_downsample_size']))
-    pcd, _ = pcd.remove_statistical_outlier(
+    pcd = timed('nbv_downsample', lambda: pcd.voxel_down_sample(
+        voxel_size=float(parameters['voxel_downsample_size'])))
+    pcd, _ = timed('nbv_outlier_filter', lambda: pcd.remove_statistical_outlier(
         nb_neighbors=int(parameters['outlier_neighbors']),
-        std_ratio=float(parameters['outlier_std_ratio']))
+        std_ratio=float(parameters['outlier_std_ratio'])))
     
     if len(pcd.points) < 40:
         return []
         
     # Normal generation (oriented towards AUV)
-    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
+    timed('nbv_normal_estimation', lambda: pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
         radius=float(parameters['normal_radius']),
-        max_nn=int(parameters['normal_max_neighbors'])))
-    pcd.orient_normals_towards_camera_location(auv_position)
+        max_nn=int(parameters['normal_max_neighbors']))))
+    timed('nbv_normal_orientation', lambda: pcd.orient_normals_towards_camera_location(auv_position))
     
     cleaned_points = np.asarray(pcd.points)
     normals = np.asarray(pcd.normals)
     pcd_tree = KDTree(cleaned_points)
     
     # 2. Mathematical Pipeline
-    complexities = calculate_pca_complexity(
-        pcd, k=int(parameters['pca_neighbors']))
-    frontier_indices = detect_frontiers(
+    complexities = timed('nbv_pca', lambda: calculate_pca_complexity(
+        pcd, k=int(parameters['pca_neighbors'])))
+    frontier_indices = timed('nbv_frontier_detection', lambda: detect_frontiers(
         pcd,
         k=int(parameters['frontier_neighbors']),
-        angle_threshold_deg=float(parameters['frontier_angle_threshold_deg']))
-    clusters = cluster_frontiers(
+        angle_threshold_deg=float(parameters['frontier_angle_threshold_deg'])))
+    clusters = timed('nbv_clustering', lambda: cluster_frontiers(
         cleaned_points,
         normals,
         frontier_indices,
         fov_radius=float(parameters['cluster_fov_radius']),
         max_angle_deg=float(parameters['cluster_max_angle_deg']),
-        min_samples=int(parameters['cluster_min_samples']))
+        min_samples=int(parameters['cluster_min_samples'])))
     
     if not clusters:
         return []
 
     # 3. Candidate Generation & Raw Evaluation
+    evaluation_started = time.perf_counter()
     all_candidates = []
     min_raw_gain = float(parameters['min_raw_gain'])
+    observation_positions = np.asarray(
+        [sample[0] for sample in observation_history], dtype=float).reshape(-1, 3)
+    observation_yaws = np.asarray([sample[1] for sample in observation_history])
     
     for cluster in clusters:
-        already_visited = False
-        for obs_pos, obs_yaw in observation_history:
-            vec = cluster['centroid'] - obs_pos
-            dist = np.linalg.norm(vec)
-            
-            # 1. Was it within the camera's physical range?
-            if (parameters['visited_min_distance'] < dist
-                    < parameters['visited_max_distance']):
-                # 2. Was the AUV physically facing it?
-                angle_to_target = np.arctan2(vec[1], vec[0])
-                
-                # Normalize the angle difference
-                yaw_diff = np.abs(np.arctan2(
-                    np.sin(angle_to_target - obs_yaw), 
-                    np.cos(angle_to_target - obs_yaw)
-                ))
-                
-                if yaw_diff < np.radians(
-                    parameters['visited_yaw_threshold_deg']):
-                    LOGGER.info(
-                        f"Cluster {cluster['id']} was already observed "
-                        f"(distance: {dist:.2f} m, "
-                        f"yaw_diff: {np.degrees(yaw_diff):.2f} deg).")
-                    already_visited = True
-                    break
-                else:
-                    LOGGER.info(
-                        f"Cluster {cluster['id']} was in range but outside "
-                        f"camera FOV (yaw_diff: "
-                        f"{np.degrees(yaw_diff):.2f} deg).")
-            else:
-                LOGGER.info(
-                    f"Cluster {cluster['id']} is out of range from previous "
-                    f"observation (distance: {dist:.2f} m).")
-                
+        vectors = cluster['centroid'] - observation_positions
+        distances = np.linalg.norm(vectors, axis=1)
+        angles = np.arctan2(vectors[:, 1], vectors[:, 0]) - observation_yaws
+        yaw_diffs = np.abs(np.arctan2(np.sin(angles), np.cos(angles)))
+        already_visited = np.any(
+            (distances > parameters['visited_min_distance'])
+            & (distances < parameters['visited_max_distance'])
+            & (yaw_diffs < np.radians(parameters['visited_yaw_threshold_deg'])))
         if already_visited:
             continue # Drop this cluster, we have confirmed visual coverage
 
@@ -354,7 +330,9 @@ def calculate_nbv_waypoints(
             azimuth_steps=int(parameters['azimuth_steps']))
         
         for cand in candidates:
-            gain = evaluate_viewpoint(cand['position'], cluster['points'], cluster['normals'], c_complexities)
+            gain = evaluate_viewpoint(
+                cand['position'], cluster['points'], cluster['normals'], c_complexities,
+                complexity_weight=float(parameters['complexity_weight']))
             
             # Apply the threshold
             if gain < min_raw_gain:
@@ -383,6 +361,9 @@ def calculate_nbv_waypoints(
             })
 
     # If all frontiers were either visited or below the gain threshold, exploration is done
+    if timing_callback is not None:
+        timing_callback('nbv_candidate_evaluation',
+                        (time.perf_counter() - evaluation_started) * 1000.0)
     if not all_candidates:
         return []
 

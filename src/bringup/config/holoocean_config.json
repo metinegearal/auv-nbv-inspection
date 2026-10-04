@@ -1,7 +1,7 @@
 {
     "name": "test_rgb_camera",
-    "world": "TestWorld",
-    "package_name": "BauRov",
+    "world": "OpenWater",
+    "package_name": "Ocean",
     "main_agent": "auv0",
     "ticks_per_sec": 30,
     "agents": [
@@ -116,7 +116,7 @@
                 }
             ],
             "control_scheme": 0,
-            "location": [-19, -85, -29],
+            "location": [350, 828, -298],
             "rotation": [0, 0, 0]
         }
     ]

@@ -1,4 +1,5 @@
 import math
+import json
 import time
 from threading import Lock
 from pathlib import Path
@@ -31,6 +32,29 @@ from .trajectory_optimization import (
 )
 
 
+def body_rotation(roll, pitch, yaw):
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return np.array([
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ])
+
+
+def vehicle_viewpoint(camera_position, target, camera_offset):
+    """Place the vehicle so its mounted camera reaches the desired viewpoint."""
+    yaw = math.atan2(target[1] - camera_position[1], target[0] - camera_position[0])
+    for _ in range(12):
+        vehicle = camera_position - body_rotation(0., 0., yaw) @ camera_offset
+        next_yaw = math.atan2(target[1] - vehicle[1], target[0] - vehicle[0])
+        if abs(math.atan2(math.sin(next_yaw - yaw), math.cos(next_yaw - yaw))) < 1e-8:
+            return vehicle
+        yaw = next_yaw
+    return camera_position - body_rotation(0., 0., yaw) @ camera_offset
+
+
 class NBVUtilityNode(Node):
     """Build a depth map online and publish NBV viewpoints."""
 
@@ -41,7 +65,7 @@ class NBVUtilityNode(Node):
         self.max_depth = self.declare_parameter('max_depth', 3.0).value
         self.min_depth = self.declare_parameter('min_depth', 0.5).value
         self.z_min_target = self.declare_parameter(
-            'z_min_target', -31.5).value
+            'z_min_target', -3000.0).value
         self.depth_stride = self.declare_parameter('depth_stride', 8).value
         self.depth_scale = self.declare_parameter('depth_scale', 1.0).value
         self.frame_period = self.declare_parameter('planning_period', 10).value
@@ -49,6 +73,10 @@ class NBVUtilityNode(Node):
             'min_utility_threshold', 0.005).value
         self.collision_radius = self.declare_parameter(
             'collision_radius', 0.6).value
+        self.collision_tracking_margin = self.declare_parameter(
+            'collision_tracking_margin', 0.4).value
+        self.blacklist_cooldown_s = self.declare_parameter(
+            'route_blacklist_cooldown_s', 30.0).value
         self.trajectory_points = self.declare_parameter(
             'trajectory_points', 300).value
         self.waypoint_spacing = self.declare_parameter(
@@ -58,6 +86,10 @@ class NBVUtilityNode(Node):
         self.visit_radius = self.declare_parameter('visit_radius', 0.25).value
         self.results_dir = self.declare_parameter(
             'results_dir', 'results').value
+        self.nbv_filter_logging = self.declare_parameter(
+            'nbv_filter_logging', True).value
+        self._nbv_empty_reason = None
+        self._plan_failure_reason = None
         self.use_incremental_map_cache = self.declare_parameter(
             'use_incremental_map_cache', True).value
         self.nbv_parameters = {
@@ -66,7 +98,9 @@ class NBVUtilityNode(Node):
             for name, default in DEFAULT_NBV_PARAMETERS.items()
             if name != 'z_min_target'
         }
-        self.nbv_parameters['z_min_target'] = self.z_min_target
+        # The baseline NBV function filtered at -31.5 independently of mapping.
+        self.nbv_parameters['z_min_target'] = self.declare_parameter(
+            'nbv_z_min_target', DEFAULT_NBV_PARAMETERS['z_min_target']).value
         self.astar_max_steps = self.declare_parameter(
             'astar_max_steps', 50000).value
         self.spline_smoothing = self.declare_parameter(
@@ -75,8 +109,10 @@ class NBVUtilityNode(Node):
             'collision_check_spacing_factor', 0.5).value
         self.arrival_target_radius = self.declare_parameter(
             'arrival_target_radius', 1.5).value
+        self.replan_on_target_arrival = self.declare_parameter(
+            'replan_on_target_arrival', False).value
         self.optimize_motion = self.declare_parameter(
-            'trajectory_optimization_enabled', True).value
+            'trajectory_optimization_enabled', False).value
         self.velocity_history_window = self.declare_parameter(
             'velocity_history_window', 1.0).value
         self.trajectory_history_window = self.declare_parameter(
@@ -129,6 +165,7 @@ class NBVUtilityNode(Node):
         self.failed_plan_count = 0
         self.observation_history = []
         self.blacklisted_targets = []
+        self.blacklist_expiries = {}
 
         qos = rclpy.qos.QoSProfile(depth=10)
         qos.reliability = rclpy.qos.QoSReliabilityPolicy.BEST_EFFORT
@@ -155,7 +192,12 @@ class NBVUtilityNode(Node):
         self.evaluation_file = open(
             Path(self.results_dir) / 'evaluation_parameters.txt', 'a')
 
-        self.get_logger().info('NBV utility node started in Python')
+        self.get_logger().info(
+            f'NBV utility node started: active NBV filter is Z > '
+            f'{self.nbv_parameters["z_min_target"]}; '
+            f'z_min_target={self.z_min_target} is not used by this filter')
+        if self.nbv_filter_logging:
+            self.get_logger().info(f'NBV filter diagnostics: {self.telemetry.filter_path}')
 
     def request_nbv_callback(self, msg):
         """Triggered instantly when C++ PathPlanner runs out of waypoints."""
@@ -177,6 +219,9 @@ class NBVUtilityNode(Node):
         """Update the vehicle pose with state_lock held."""
         position = msg.pose.pose.position
         if abs(position.x) < 0.01 and abs(position.y) < 0.01:
+            self._log_nbv_filter('odometry_origin_guard', 1, 0,
+                                 {'position': [position.x, position.y, position.z],
+                                  'xy_threshold': 0.01})
             return
 
         self.position = np.array(
@@ -261,6 +306,8 @@ class NBVUtilityNode(Node):
         """Project a depth image into the vehicle world frame."""
         depth = np.asarray(depth_frame)
         if depth.ndim != 2:
+            self._log_nbv_filter('depth_image_shape', int(depth.size), 0,
+                                 {'shape': list(depth.shape), 'required_dimensions': 2})
             return np.empty((0, 3), dtype=np.float64)
 
         scale = 0.001 if depth.dtype == np.uint16 else self.depth_scale
@@ -272,6 +319,20 @@ class NBVUtilityNode(Node):
         valid = np.isfinite(distances)
         valid &= (distances > self.min_depth)
         valid &= (distances < self.max_depth)
+        finite_distances = distances[np.isfinite(distances)]
+        self._log_nbv_filter('depth_range', int(distances.size), int(np.count_nonzero(valid)),
+                             {'min_depth': self.min_depth, 'max_depth': self.max_depth,
+                              'comparison': 'min_depth < distance < max_depth',
+                              'nonfinite': int(np.count_nonzero(~np.isfinite(distances))),
+                              'at_or_below_min': int(np.count_nonzero(
+                                  np.isfinite(distances) & (distances <= self.min_depth))),
+                              'at_or_above_max': int(np.count_nonzero(
+                                  np.isfinite(distances) & (distances >= self.max_depth))),
+                              'distance_min': float(finite_distances.min()) if finite_distances.size else None,
+                              'distance_max': float(finite_distances.max()) if finite_distances.size else None,
+                              'depth_scale': scale, 'stride': stride,
+                              'horizontal_fov_deg': 90.0, 'camera_pitch_deg': 45.0,
+                              'camera_offset': self.camera_offset})
         if not np.any(valid):
             return np.empty((0, 3), dtype=np.float64)
 
@@ -289,15 +350,9 @@ class NBVUtilityNode(Node):
         local_z = -distances * math.sin(pitch) - camera_y * math.cos(pitch)
         local_points = np.column_stack((local_x, local_y, local_z))
 
-        cr, sr = math.cos(self.latched_roll), math.sin(self.latched_roll)
-        cp, sp = math.cos(self.latched_pitch), math.sin(self.latched_pitch)
-        cy, sy = math.cos(self.latched_yaw), math.sin(self.latched_yaw)
-        rotation = np.array([
-            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-            [-sp, cp * sr, cp * cr],
-        ])
-        return local_points @ rotation.T + self.latched_position + self.camera_offset
+        rotation = body_rotation(self.latched_roll, self.latched_pitch, self.latched_yaw)
+        self._depth_sensor_origin = self.latched_position + rotation @ self.camera_offset
+        return local_points @ rotation.T + self._depth_sensor_origin
 
     def _accumulate_depth(self):
         points = self._depth_points(self.depth_frame)
@@ -306,10 +361,13 @@ class NBVUtilityNode(Node):
             self.get_logger().warning('Depth projection yielded 0 valid points (all out of range or invalid).', throttle_duration_sec=2.0)
             return
 
+        before_point_cap = len(points)
         if len(points) > 4000:
             # Randomly sample exactly 4000 points to preserve the pipe's overall shape
             indices = np.random.choice(len(points), 4000, replace=False)
             points = points[indices]
+        self._log_nbv_filter('depth_point_cap', before_point_cap,
+                             len(points), {'limit': 4000})
 
         if self.use_incremental_map_cache:
             voxel_indices = np.floor(
@@ -319,7 +377,7 @@ class NBVUtilityNode(Node):
             self.occupied_voxels.update(new_voxels)
             self.pending_occupied_voxels.update(new_voxels)
             
-        sensor_origin = self.latched_position + self.camera_offset
+        sensor_origin = self._depth_sensor_origin
         self.octree.insertPointCloud(
             points.astype(np.float64),
             sensor_origin=sensor_origin.astype(np.float64),
@@ -361,16 +419,25 @@ class NBVUtilityNode(Node):
             return np.empty((0, 3), dtype=np.float64)
         return points.reshape((-1, 3))
 
-    def _publish_trajectory(self, trajectory):
-        """Publish a collision-checked Nx4 trajectory."""
+    def _publish_trajectory(self, trajectory, occupied):
+        """Validate the vehicle coordinates reconstructed from the wire message."""
         if len(trajectory) == 0:
             return False
 
+        wire = np.asarray(trajectory, dtype=np.float64).copy()
+        # The existing iterator subtracts this offset; compensate exactly once.
+        wire[:, :3] += self.camera_offset
+        wire = wire.astype(np.float32)
+        executed = wire.astype(np.float64)
+        executed[:, :3] -= self.camera_offset
+        if not path_is_collision_free(executed[:, :3], occupied, self.resolution):
+            self._log_nbv_filter('vehicle_wire_validation', len(trajectory), 0,
+                                 {'reason': 'executed_vehicle_route_collision'})
+            return False
         message = Float32MultiArray()
-        message.data = np.asarray(
-            trajectory, dtype=np.float32).flatten().tolist()
+        message.data = wire.flatten().tolist()
         self.waypoint_pub.publish(message)
-        self.active_trajectory = np.asarray(trajectory, dtype=np.float64)
+        self.active_trajectory = executed
         self.started_mapping = True
         self.get_logger().info(
             f'Published {len(self.active_trajectory)} trajectory points')
@@ -378,15 +445,31 @@ class NBVUtilityNode(Node):
 
     def _plan_and_publish(self, candidates, occupied):
         """Run A*, smooth its route, and publish only a safe trajectory."""
+        self._plan_failure_reason = None
+        self._failed_route_target = None
         valid_candidates = [
             candidate for candidate in candidates
             if candidate['utility'] >= self.min_utility
         ]
+        for candidate in candidates:
+            self._log_nbv_filter('candidate_minimum_utility', 1,
+                                 int(candidate['utility'] >= self.min_utility),
+                                 {'cluster_id': candidate.get('cluster_id'),
+                                  'target': candidate['target'],
+                                  'position': candidate['position'],
+                                  'utility': candidate['utility'],
+                                  'threshold': self.min_utility})
+        self._log_nbv_filter('minimum_utility', len(candidates), len(valid_candidates),
+                             {'threshold': self.min_utility})
         if not valid_candidates:
+            self._plan_failure_reason = ('minimum_utility_removed_all' if candidates
+                                         else 'no_candidates_to_plan')
             return False
+        valid_candidates.sort(key=lambda candidate: candidate['utility'], reverse=True)
 
         route_candidates = [
-            (np.asarray(candidate['position'], dtype=np.float64),
+            (vehicle_viewpoint(np.asarray(candidate['position'], dtype=np.float64),
+                               np.asarray(candidate['target'], dtype=np.float64), self.camera_offset),
              np.asarray(candidate['target'], dtype=np.float64))
             for candidate in valid_candidates
         ]
@@ -395,7 +478,7 @@ class NBVUtilityNode(Node):
         velocity = estimate_velocity(
             history, float(self.velocity_history_window))
         latest_time = history[-1][0] if history else 0.0
-        recent_positions = [sample[1] + self.camera_offset
+        recent_positions = [sample[1]
                             for sample in history
                             if 0.0 <= latest_time - sample[0]
                             <= float(self.trajectory_history_window)]
@@ -403,7 +486,7 @@ class NBVUtilityNode(Node):
             indices = np.linspace(0, len(recent_positions) - 1, 64).astype(int)
             recent_positions = [recent_positions[index] for index in indices]
         route, targets = plan_multi_waypoint_route(
-            position + self.camera_offset,
+            position,
             route_candidates,
             occupied,
             self.resolution,
@@ -415,42 +498,68 @@ class NBVUtilityNode(Node):
         self.telemetry.record_stage(
             'route_search', (time.perf_counter() - route_started) * 1000.0,
             iteration=self.iteration)
-        if len(route) == 0 or not path_is_collision_free(
+        route_safe = len(route) > 0 and path_is_collision_free(
             route,
             occupied,
             self.resolution,
-            self.collision_check_spacing_factor):
+            self.collision_check_spacing_factor)
+        self._log_nbv_filter('route_validation', len(route), len(route) if route_safe else 0,
+                             {'route_points': len(route), 'collision_free': route_safe,
+                              'collision_voxels': len(occupied),
+                              'resolution': self.resolution,
+                              'spacing_factor': self.collision_check_spacing_factor})
+        if not route_safe:
+            self._plan_failure_reason = 'astar_removed_all' if len(route) == 0 else 'route_collision'
+            self._failed_route_target = np.copy(valid_candidates[0]['target'])
             self.get_logger().warning('A* produced no collision-free route')
             return False
 
         trajectory_started = time.perf_counter()
-        trajectory = generate_smooth_trajectory(
-            route,
-            targets,
-            num_points=int(self.trajectory_points),
-            smoothing=float(self.spline_smoothing),
-            sampling_spacing=float(self.waypoint_spacing),
-        )
-        raw_trajectory = np.column_stack((route, np.arctan2(
-            targets[:, 1] - route[:, 1], targets[:, 0] - route[:, 0])))
+        route_options = [('spline', route, targets)]
+        target_changes = np.flatnonzero(np.any(targets != targets[0], axis=1))
+        if len(target_changes) and target_changes[0] >= 4:
+            first_end = int(target_changes[0])
+            route_options.append(('first_target_spline', route[:first_end], targets[:first_end]))
         safe_options = []
-        for option in (trajectory, raw_trajectory):
+        # A voxel polyline is not a dynamically validated trajectory for this controller.
+        for option_name, option_route, option_targets in route_options:
+            option = generate_smooth_trajectory(
+                option_route, option_targets,
+                num_points=int(self.trajectory_points),
+                smoothing=float(self.spline_smoothing),
+                sampling_spacing=float(self.waypoint_spacing))
             if len(option) == 0:
+                self._log_nbv_filter('trajectory_option', 0, 0,
+                                     {'option': option_name, 'reason': 'empty_trajectory',
+                                      'route_points': len(option_route), 'spline_minimum_points': 4})
                 continue
             option = option.copy()
-            option[0, :3] = route[0]
-            option[-1, :3] = route[-1]
+            option[0, :3] = option_route[0]
+            option[-1, :3] = option_route[-1]
             if self.optimize_motion:
                 option[:, 3] = np.unwrap(np.r_[yaw, option[:, 3]])[1:]
                 option[0, 3] = yaw
             option = resample_trajectory_by_distance(
                 option, float(self.waypoint_spacing),
                 max_points=int(self.trajectory_points))
-            if path_is_collision_free(
+            option_safe = path_is_collision_free(
                     option[:, :3], occupied, self.resolution,
-                    self.collision_check_spacing_factor):
-                safe_options.append(option)
+                    self.collision_check_spacing_factor)
+            self._log_nbv_filter('trajectory_option', len(option),
+                                 len(option) if option_safe else 0,
+                                 {'option': option_name, 'collision_free': option_safe,
+                                  'waypoint_spacing': self.waypoint_spacing,
+                                  'requested_max_points': int(self.trajectory_points),
+                                  'mandatory_corners_exceed_cap': len(option) > int(self.trajectory_points)})
+            if option_safe:
+                safe_options.append((option, option_targets))
+                if not self.optimize_motion:
+                    break  # Baseline mode needs only the first validated route.
         if not safe_options:
+            self._plan_failure_reason = 'all_trajectory_options_rejected'
+            # This is the first target in travel order, which can differ from
+            # the highest-utility candidate. Its prefix spline also failed.
+            self._failed_route_target = np.copy(targets[0])
             self.get_logger().warning(
                 'Resampled spline intersects the collision boundary; '
                 'route rejected')
@@ -459,14 +568,14 @@ class NBVUtilityNode(Node):
                 (time.perf_counter() - trajectory_started) * 1000.0,
                 iteration=self.iteration, details='rejected')
             return False
-        trajectory = min(safe_options, key=lambda option: continuity_cost(
-            option, velocity, recent_positions, **self.motion_cost_parameters)
+        trajectory, execution_targets = min(safe_options, key=lambda option: continuity_cost(
+            option[0], velocity, recent_positions, **self.motion_cost_parameters)
         ) if self.optimize_motion else safe_options[0]
         if self.optimize_motion:
             before_cost = continuity_cost(
                 trajectory, velocity, recent_positions, **self.motion_cost_parameters)
             trajectory = optimize_trajectory(
-                trajectory, position + self.camera_offset, yaw, velocity,
+                trajectory, position, yaw, velocity,
                 occupied, self.resolution, recent_positions,
                 **self.motion_cost_parameters,
                 max_deviation=float(self.optimizer_max_deviation),
@@ -484,23 +593,79 @@ class NBVUtilityNode(Node):
             
         publish_started = time.perf_counter()
         latest_position, latest_yaw, _ = self._motion_snapshot()
+        before_reconnect = len(trajectory)
         trajectory = reconnect_trajectory(
-            trajectory, latest_position + self.camera_offset, latest_yaw,
+            trajectory, latest_position, latest_yaw,
             occupied, self.resolution, self.collision_check_spacing_factor)
+        self._log_nbv_filter('trajectory_reconnection', before_reconnect, len(trajectory),
+                             {'latest_vehicle_position': latest_position,
+                              'latest_yaw': latest_yaw})
         if len(trajectory) == 0:
+            self._plan_failure_reason = 'trajectory_reconnection_rejected'
             self.force_replan = True
             self.get_logger().warning(
                 'Vehicle moved during planning; no safe entry to the new route. '
                 'Requesting a fresh plan.')
-        success = self._publish_trajectory(trajectory)
+        success = self._publish_trajectory(trajectory, occupied)
         self.telemetry.record_stage(
             'trajectory_publish', (time.perf_counter() - publish_started) * 1000.0,
             iteration=self.iteration,
             details='published' if success else 'rejected')
         if success:
-            self.selected_targets = [np.copy(target) for target in targets]
+            self.selected_targets = [np.copy(target) for target in execution_targets]
             # DELETED: We no longer add targets to memory here!
+        elif self._plan_failure_reason is None:
+            self._plan_failure_reason = 'trajectory_publish_rejected'
+            self._failed_route_target = np.copy(execution_targets[0])
         return success
+
+    def _expire_target_blacklist(self):
+        now = time.perf_counter()
+        retained = []
+        for target in self.blacklisted_targets:
+            expiry = self.blacklist_expiries.get(tuple(target), 0.0)
+            if expiry > now:
+                retained.append(target)
+            else:
+                self.blacklist_expiries.pop(tuple(target), None)
+                self._log_nbv_filter('blacklist_expired', 1, 1, {'target': target})
+        self.blacklisted_targets = retained
+
+    def _blacklist_failed_target(self):
+        """Suppress the failed target briefly so another structure can be tried."""
+        if self._failed_route_target is None or self.blacklist_cooldown_s <= 0.0:
+            return False
+        target = np.asarray(self._failed_route_target, dtype=float).copy()
+        existing = next((bt for bt in self.blacklisted_targets
+                         if np.linalg.norm(target - bt) < 0.5), None)
+        if existing is None:
+            self.blacklisted_targets.append(target)
+        else:
+            target = existing
+        self.blacklist_expiries[tuple(target)] = time.perf_counter() + self.blacklist_cooldown_s
+        self._log_nbv_filter('blacklist_addition', 1, 0,
+                             {'target': target, 'planning_failure': self._plan_failure_reason,
+                              'radius': 0.5, 'expires': True,
+                              'cooldown_s': self.blacklist_cooldown_s})
+        self.get_logger().warning(
+            f'Planning rejected ({self._plan_failure_reason}); '
+            f'blacklisting failed target {target.tolist()} for {self.blacklist_cooldown_s:g}s.')
+        self.force_replan = True
+        return True
+
+    def _log_nbv_filter(self, stage, input_count, output_count, details):
+        """Log every filter transition to ROS and a per-frame JSONL event stream."""
+        if not self.nbv_filter_logging:
+            return
+        if stage == 'nbv_empty':
+            self._nbv_empty_reason = details.get('reason')
+        safe_details = MidrunLogger._json_safe(details)
+        self.get_logger().info(
+            f'[NBV_FILTER iteration={self.iteration} frame={self.depth_sequence}] '
+            f'{stage}: {input_count} -> {output_count} '
+            f'{json.dumps(safe_details, allow_nan=False)}')
+        self.telemetry.record_filter(stage, input_count, output_count, safe_details,
+                                     iteration=self.iteration, frame_id=self.depth_sequence)
 
     def _active_trajectory_is_safe(self, occupied):
         """Check the currently published route against the updated map."""
@@ -511,6 +676,16 @@ class NBVUtilityNode(Node):
             occupied,
             self.resolution,
             self.collision_check_spacing_factor)
+
+    def _cancel_active_trajectory(self):
+        """Cancel the downstream queue as well as the planner's cached route."""
+        previous_count = len(self.active_trajectory)
+        self.waypoint_pub.publish(Float32MultiArray())
+        self.active_trajectory = np.empty((0, 4), dtype=np.float64)
+        self.selected_targets = []
+        self._log_nbv_filter('trajectory_cancelled', previous_count, 0,
+                             {'reason': 'new_obstacle_on_active_route',
+                              'downstream_queue_cleared': True})
 
     def timer_callback(self):
         """Update the map and periodically publish the next viewpoints."""
@@ -555,26 +730,26 @@ class NBVUtilityNode(Node):
                 self.collision_voxels.update(
                     inflate_occupied(
                         new_voxels,
-                        self.collision_radius,
+                        self.collision_radius + self.collision_tracking_margin,
                         self.resolution))
             collision_voxels = self.collision_voxels
         else:
             occupied_indices = set(map(
                 tuple, np.floor(occupied_points / self.resolution).astype(int)))
             collision_voxels = inflate_occupied(
-                occupied_indices, self.collision_radius, self.resolution)
+                occupied_indices, self.collision_radius + self.collision_tracking_margin, self.resolution)
         self.telemetry.record_stage(
             'collision_inflation', (time.perf_counter() - stage_started) * 1000.0,
             iteration=self.iteration, frame_id=self.depth_sequence)
             
         route_blocked = not self._active_trajectory_is_safe(collision_voxels)
         if route_blocked:
-            self.active_trajectory = np.empty((0, 4), dtype=np.float64)
+            self._cancel_active_trajectory()
             self.get_logger().warning('🚨 Active trajectory collided with newly mapped space; forcing replan!')
 
 
         arrived_at_target = False
-        if self.selected_targets:
+        if self.replan_on_target_arrival and self.selected_targets:
             for target in self.selected_targets:
                 # Calculate absolute distance to the NBV centroid
                 dist = np.linalg.norm(self.position - target)
@@ -595,6 +770,15 @@ class NBVUtilityNode(Node):
         )
         
         if should_plan:
+            self._nbv_empty_reason = None
+            self._log_nbv_filter('planning_begin', len(occupied_points), len(occupied_points),
+                                 {'periodic': self.iteration % max(1, int(self.frame_period)) == 0,
+                                  'route_blocked': bool(route_blocked),
+                                  'forced': bool(self.force_replan),
+                                  'arrived_at_target': bool(arrived_at_target),
+                                  'collision_voxels': len(collision_voxels),
+                                  'blacklisted_targets': self.blacklisted_targets,
+                                  'minimum_utility': self.min_utility})
             self.force_replan = False # Reset the flag
             self.get_logger().info(f'--- PLANNING TRIGGERED (Iteration {self.iteration}) ---')
             self.get_logger().info(f'Saving OctoMap to: {self.map_path}')
@@ -604,7 +788,9 @@ class NBVUtilityNode(Node):
                 'octomap_save', (time.perf_counter() - stage_started) * 1000.0,
                 iteration=self.iteration)
             
-            nbv_position, nbv_yaw, _ = self._motion_snapshot()
+            nbv_position, nbv_yaw, nbv_history = self._motion_snapshot()
+            roll, pitch = nbv_history[-1][2:4] if nbv_history else (0., 0.)
+            camera_position = nbv_position + body_rotation(roll, pitch, nbv_yaw) @ self.camera_offset
             heading = np.array([math.cos(nbv_yaw), math.sin(nbv_yaw), 0.0])
             
             nbv_started = time.perf_counter()
@@ -612,48 +798,94 @@ class NBVUtilityNode(Node):
                 self.get_logger().info('Calculating NBV waypoints...')
                 candidates = calculate_nbv_waypoints(
                     occupied_points,
-                    nbv_position + self.camera_offset,
+                    camera_position,
                     heading,
                     self.observation_history,
                     self.nbv_parameters,
+                    timing_callback=lambda stage, duration_ms:
+                        self.telemetry.record_stage(
+                            stage, duration_ms, iteration=self.iteration),
                 )
                 self.get_logger().info(f'Found {len(candidates)} valid NBV targets.')
             except (ValueError, RuntimeError) as error:
                 self.get_logger().error(f'NBV calculation failed: {error}')
+                self._nbv_empty_reason = 'nbv_exception'
+                self._log_nbv_filter('nbv_exception', len(occupied_points), 0,
+                                     {'exception_type': type(error).__name__, 'error': str(error)})
                 candidates = []
             self.telemetry.record_stage(
                 'nbv_generation', (time.perf_counter() - nbv_started) * 1000.0,
                 iteration=self.iteration,
                 details=f'candidates={len(candidates)}')
 
+            self._expire_target_blacklist()
             safe_candidates = []
             for cand in candidates:
                 # If this target is within 0.5m of a known bad coordinate, drop it
                 is_banned = any(np.linalg.norm(cand['target'] - bt) < 0.5 for bt in self.blacklisted_targets)
+                self._log_nbv_filter('candidate_blacklist', 1, int(not is_banned),
+                                     {'cluster_id': cand.get('cluster_id'), 'target': cand['target'],
+                                      'radius': 0.5,
+                                      'matching_bans': [
+                                          {'target': bt, 'distance': float(np.linalg.norm(cand['target'] - bt)),
+                                           'remaining_s': max(0.0, self.blacklist_expiries[tuple(bt)] - time.perf_counter())}
+                                          for bt in self.blacklisted_targets
+                                          if np.linalg.norm(cand['target'] - bt) < 0.5]})
                 if not is_banned:
                     safe_candidates.append(cand)
 
             if len(safe_candidates) < len(candidates):
                 self.get_logger().info(f"Dropped {len(candidates) - len(safe_candidates)} blacklisted targets.")
+            self._log_nbv_filter('blacklist', len(candidates), len(safe_candidates),
+                                 {'radius': 0.5, 'blacklisted_target_count': len(self.blacklisted_targets)})
 
             # Pass the SAFE candidates to the planner
             published = self._plan_and_publish(safe_candidates, collision_voxels)
+            failure_reason = ((self._nbv_empty_reason or 'nbv_generation_returned_no_candidates')
+                              if not candidates else
+                              'blacklist_removed_all' if not safe_candidates else
+                              self._plan_failure_reason)
+            self._log_nbv_filter('planning_result', len(candidates), int(published),
+                                 {'published': bool(published),
+                                  'reason': 'published' if published else failure_reason,
+                                  'generated_candidates': len(candidates),
+                                  'after_blacklist': len(safe_candidates),
+                                  'active_trajectory_points': len(self.active_trajectory)})
+            if not published:
+                self.get_logger().warning(f'[NBV_EMPTY] No trajectory published: {failure_reason}')
 
 
             if published:
                 self.failed_plan_count = 0  # Reset counter on success
             else:
                 if self.force_replan:
-                    pass  # A stale entry is not evidence that the target is bad.
+                    pass  # Vehicle simply moved during planning; not a failure of the candidates.
                 elif len(safe_candidates) > 0:
-                    self.get_logger().warning('Spline rejected. Blacklisting top target to prevent infinite loop.')
-                    # Hard-ban the physical coordinate of the culprit so it never gets passed to A* again
-                    self.blacklisted_targets.append(np.copy(safe_candidates[0]['target']))
+                    # We had candidates, but failed to publish. 
+                    # Did we identify a specific bad target to blacklist?
+                    if not self._blacklist_failed_target():
+                        self._log_nbv_filter('blacklist_skipped', len(safe_candidates), len(safe_candidates),
+                                             {'reason': 'no_individual_failed_target',
+                                              'planning_failure': self._plan_failure_reason})
+                        
+                        # CRITICAL FIX: If we didn't blacklist anything but still failed 
+                        # (e.g., minimum_utility_removed_all), the entire batch is unusable. Strike out!
+                        self.failed_plan_count += 1
+                        self.get_logger().warning(
+                            f'All safe candidates failed ({self._plan_failure_reason}). Strike {self.failed_plan_count}/3'
+                        )
                 else:
+                    # CRITICAL FIX: Increment if NO safe candidates exist (all banned or none found).
                     self.failed_plan_count += 1
-                    self.get_logger().warning(f'No frontiers found. Strike {self.failed_plan_count}/3')
-
+                    self.get_logger().warning(
+                        f'No valid candidates remain ({failure_reason}). Strike {self.failed_plan_count}/3'
+                    )
+            
             if self.failed_plan_count >= 3:
+                self._log_nbv_filter('mission_completion', self.failed_plan_count, 0,
+                                     {'reason': 'three_empty_candidate_passes',
+                                      'last_empty_reason': failure_reason,
+                                      'blacklisted_target_count': len(self.blacklisted_targets)})
                 self.finished_mapping = True
                 self.finished_pub.publish(Bool(data=True))
                 

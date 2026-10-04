@@ -22,6 +22,7 @@ class MidrunLogger:
         self.iteration_path = self.results_dir / f'{prefix}_nbv_iterations.jsonl'
         self.future_path = self.results_dir / f'{prefix}_future_trajectories.csv'
         self.pipeline_path = self.results_dir / f'{prefix}_pipeline_timing.csv'
+        self.filter_path = self.results_dir / f'{prefix}_nbv_filters.jsonl'
         self._reset_files()
 
     def _reset_files(self):
@@ -48,6 +49,29 @@ class MidrunLogger:
                 'stage', 'iteration', 'frame_id', 'duration_ms',
                 'source_stamp_s', 'details'])
         self.iteration_path.write_text('', encoding='utf-8')
+        self.filter_path.write_text('', encoding='utf-8')
+
+    def record_filter(self, stage, input_count, output_count, details,
+                      iteration=None, frame_id=None):
+        """Persist filter counts and reasons immediately for interrupted runs."""
+        event = dict(stage=stage, iteration=iteration, frame_id=frame_id,
+                     input_count=int(input_count), output_count=int(output_count),
+                     details=self._json_safe(details))
+        with self.filter_path.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(event, allow_nan=False) + '\n')
+
+    @staticmethod
+    def _json_safe(value):
+        """Retain nonfinite diagnostic values without producing invalid JSON."""
+        if isinstance(value, dict):
+            return {str(key): MidrunLogger._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [MidrunLogger._json_safe(item) for item in value]
+        if hasattr(value, 'tolist'):
+            return MidrunLogger._json_safe(value.tolist())
+        if isinstance(value, float) and not math.isfinite(value):
+            return str(value)
+        return value
 
     @staticmethod
     def _vector(value):
@@ -124,7 +148,7 @@ class MidrunLogger:
 
 
 def generate_results_plot(results_dir='results', prefix='benchmark',
-                          planner_prefix='planner'):
+                          planner_prefix='planner', show_reference_objects=True):
     """Create an XY overview with NBV scores, future routes, and camera cones."""
     try:
         import matplotlib.pyplot as plt
@@ -181,31 +205,32 @@ def generate_results_plot(results_dir='results', prefix='benchmark',
                     xytext=(3, 3), textcoords='offset points',
                     fontsize=7, color='#111827', zorder=5)
 
-    axis.add_patch(Rectangle(
-        (-14.1, -82.7), 2.1, 1.6,
-        facecolor='#2563eb', edgecolor='#1e3a8a', alpha=0.16,
-        linewidth=1.2, label='Rectangle object'))
-    axis.add_patch(Rectangle(
-        (-14.1, -87.4), 2.1, 1.6,
-        facecolor='#2563eb', edgecolor='#1e3a8a', alpha=0.16,
-        linewidth=1.2, label='Mirrored rectangle object'))
-    pipe_objects = (
-        ((-14.1, -81.1), (-15.7, -78.5)),
-        ((-12.1, -81.1), (-11.0, -78.5)),
-        ((-14.1, -88.4), (-15.7, -91.0)),
-        ((-12.1, -88.4), (-11.0, -91.0)),
-    )
-    for index, (start, end) in enumerate(pipe_objects):
-        axis.plot(
-            [start[0], end[0]], [start[1], end[1]],
-            color='#a16207', linewidth=7, alpha=0.22,
-            solid_capstyle='round',
-            label='Pipe objects' if index == 0 else (
-                'Mirrored pipe objects' if index == 2 else None))
-        axis.plot(
-            [start[0], end[0]], [start[1], end[1]],
-            color='#92400e', linewidth=1.2, alpha=0.9,
-            solid_capstyle='round')
+    if show_reference_objects:
+        axis.add_patch(Rectangle(
+            (-14.1, -82.7), 2.1, 1.6,
+            facecolor='#2563eb', edgecolor='#1e3a8a', alpha=0.16,
+            linewidth=1.2, label='Rectangle object'))
+        axis.add_patch(Rectangle(
+            (-14.1, -87.4), 2.1, 1.6,
+            facecolor='#2563eb', edgecolor='#1e3a8a', alpha=0.16,
+            linewidth=1.2, label='Mirrored rectangle object'))
+        pipe_objects = (
+            ((-14.1, -81.1), (-15.7, -78.5)),
+            ((-12.1, -81.1), (-11.0, -78.5)),
+            ((-14.1, -88.4), (-15.7, -91.0)),
+            ((-12.1, -88.4), (-11.0, -91.0)),
+        )
+        for index, (start, end) in enumerate(pipe_objects):
+            axis.plot(
+                [start[0], end[0]], [start[1], end[1]],
+                color='#a16207', linewidth=7, alpha=0.22,
+                solid_capstyle='round',
+                label='Pipe objects' if index == 0 else (
+                    'Mirrored pipe objects' if index == 2 else None))
+            axis.plot(
+                [start[0], end[0]], [start[1], end[1]],
+                color='#92400e', linewidth=1.2, alpha=0.9,
+                solid_capstyle='round')
 
     if future_path.exists():
         by_iteration = {}

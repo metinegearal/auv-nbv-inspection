@@ -22,6 +22,8 @@ class BenchmarkLogger(Node):
         self.data_saved = False
         self.results_dir = self.declare_parameter(
             'results_dir', 'results').value
+        self.show_reference_objects = self.declare_parameter(
+            'show_reference_objects', True).value
         self.telemetry = MidrunLogger(
             self.results_dir, trajectory_only=True)
         
@@ -341,7 +343,8 @@ class BenchmarkLogger(Node):
             
         self.get_logger().info(
             f"💾 Saved {csv_filename}, {diagnostics_path}, and {txt_filename}")
-        plot_path = generate_results_plot(self.results_dir)
+        plot_path = generate_results_plot(
+            self.results_dir, show_reference_objects=self.show_reference_objects)
         if plot_path is not None:
             self.get_logger().info(f'Saved mid-run overview plot to {plot_path}')
         self.data_saved = True

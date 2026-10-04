@@ -6,15 +6,21 @@ import copy
 
 def evaluate_map_accuracy(headless=False):
     # File Paths
+    single_station=True
     octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/final_map_ros2.bt"
     # octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Notes/3d_map_lawnmover/final_map.bt"
     # octomap_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Notes/3d_map_lawnmover/short_v/final_map.bt"
-    ground_truth_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_full.OBJ"
-    # ground_truth_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_m_l100_390.OBJ"
+    if single_station:
+        ground_truth_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_m_l100_390.OBJ"
+    else:
+        ground_truth_file = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_full.OBJ"
     
     # Global Coordinates from Odometry/Simulation
     obj_center_x = -13.0
-    obj_center_y = -84.75 # double station
+    if single_station:
+        obj_center_y = -81.9 # single station
+    else:
+        obj_center_y = -84.75 # double station
     # obj_center_y = -81.9 # single station
     surface_z = -32.0
 
