@@ -12,7 +12,7 @@ from python_planner import route_planning as routes
 def test_runtime_callers_match_restored_route_planning_signatures():
     package = Path(__file__).parents[1] / 'python_planner'
     checked = 0
-    for source in package.glob('*.py'):
+    for source in package.rglob('*.py'):
         tree = ast.parse(source.read_text())
         imports = {alias.asname or alias.name: alias.name
                    for node in tree.body if isinstance(node, ast.ImportFrom)

@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools', 'matplotlib'],
+    install_requires=['setuptools', 'numpy', 'open3d', 'pyoctomap', 'matplotlib'],
     zip_safe=True,
     maintainer='metin-ege',
     maintainer_email='metinegearal@gmail.com',

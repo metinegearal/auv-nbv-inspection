@@ -4,6 +4,8 @@ import ast
 import importlib.util
 import json
 import inspect
+from functools import partial
+from dataclasses import dataclass
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,14 +27,15 @@ def load_file(path, name):
 
 
 routes = load_file(ROOT / 'python_planner/route_planning.py', 'diagnostic_routes')
+defaults = load_file(ROOT / 'python_planner/domain/nbv_parameters.py', 'diagnostic_defaults')
 telemetry = load_file(
-    ROOT.parent / 'benchmark_evaluator/benchmark_evaluator/midrun_logger.py',
+    ROOT.parent / 'telemetry_adapters/telemetry_adapters/file_sinks.py',
     'diagnostic_telemetry')
 
 
 @pytest.fixture
 def pipeline():
-    source = ROOT / 'python_planner/get_NBV.py'
+    source = ROOT / 'python_planner/use_cases/nbv.py'
     tree = ast.parse(source.read_text())
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
              or (isinstance(node, ast.Assign)
@@ -55,13 +58,20 @@ def pipeline():
         def orient_normals_towards_camera_location(self, position):
             pass
 
-    ns = dict(np=np, time=time, KDTree=KDTree,
+    ns = dict(np=np, time=time, KDTree=KDTree, DEFAULT_NBV_PARAMETERS=defaults.DEFAULT_NBV_PARAMETERS,
               LOGGER=SimpleNamespace(info=lambda *args: None),
               o3d=SimpleNamespace(
                   geometry=SimpleNamespace(PointCloud=Cloud,
                                            KDTreeSearchParamHybrid=lambda **kwargs: None),
                   utility=SimpleNamespace(Vector3dVector=np.asarray)))
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), ns)
+    adapter_source = ROOT / 'python_planner/adapters/point_cloud.py'
+    adapter_nodes = [n for n in ast.parse(adapter_source.read_text()).body
+                     if isinstance(n, ast.ClassDef)]
+    ns['dataclass'] = dataclass
+    exec(compile(ast.Module(body=adapter_nodes, type_ignores=[]), str(adapter_source), 'exec'), ns)
+    ns['calculate_nbv_waypoints'] = partial(ns['calculate_nbv_waypoints'],
+        preprocessor=ns['Open3DPreprocessor'](), diagnostics=ns['LOGGER'], clock=time)
     points = np.column_stack((np.linspace(0, 1, 60), np.zeros(60), np.zeros(60)))
     cluster = dict(id=0, centroid=np.array([0., 0., 0.]),
                    avg_normal=np.array([0., 0., 1.]), points=points,
@@ -133,7 +143,7 @@ def test_pose_history_removes_matching_frontier(pipeline):
 
 def test_cluster_rejects_groups_below_minimum_sample_count(pipeline):
     ns, _ = pipeline
-    source = ast.parse((ROOT / 'python_planner/get_NBV.py').read_text())
+    source = ast.parse((ROOT / 'python_planner/use_cases/nbv.py').read_text())
     function = next(n for n in source.body if isinstance(n, ast.FunctionDef)
                     and n.name == 'cluster_frontiers')
     exec(compile(ast.Module(body=[function], type_ignores=[]), '<cluster>', 'exec'), ns)
@@ -145,9 +155,9 @@ def test_cluster_rejects_groups_below_minimum_sample_count(pipeline):
 
 def test_node_nbv_call_matches_restored_signature(pipeline):
     ns, _ = pipeline
-    tree = ast.parse((ROOT / 'python_planner/planner_node.py').read_text())
+    tree = ast.parse((ROOT / 'python_planner/use_cases/mission.py').read_text())
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-             and isinstance(node.func, ast.Name) and node.func.id == 'calculate_nbv_waypoints']
+             and isinstance(node.func, ast.Attribute) and node.func.attr == 'nbv_calculator']
     assert calls
     for call in calls:
         inspect.signature(ns['calculate_nbv_waypoints']).bind(
@@ -156,7 +166,7 @@ def test_node_nbv_call_matches_restored_signature(pipeline):
 
 def test_pipeline_passes_complexity_weight_to_gain_calculation(pipeline):
     ns, points = pipeline
-    source = ROOT / 'python_planner/get_NBV.py'
+    source = ROOT / 'python_planner/use_cases/nbv.py'
     function = next(node for node in ast.parse(source.read_text()).body
                     if isinstance(node, ast.FunctionDef) and node.name == 'evaluate_viewpoint')
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), ns)
@@ -205,7 +215,7 @@ def test_jsonl_logs_iteration_and_handles_nonfinite_values(tmp_path):
 
 
 def node_method(name, **extra_globals):
-    source = ROOT / 'python_planner/planner_node.py'
+    source = ROOT / 'python_planner/use_cases/mission.py'
     tree = ast.parse(source.read_text())
     node_class = next(node for node in tree.body if isinstance(node, ast.ClassDef))
     method = next(node for node in node_class.body
@@ -217,7 +227,19 @@ def node_method(name, **extra_globals):
     helpers = [node for node in tree.body if isinstance(node, ast.FunctionDef)
                and node.name in ('body_rotation', 'vehicle_viewpoint')]
     exec(compile(ast.Module(body=[*helpers, method], type_ignores=[]), str(source), 'exec'), namespace)
-    return namespace[name]
+    # Method fixtures supply the same injected ports as the production composition root.
+    output_source = ROOT / 'python_planner/adapters/ros_output.py'
+    output_nodes = [n for n in ast.parse(output_source.read_text()).body
+                    if isinstance(n, ast.ClassDef) and n.name == 'RosTrajectoryOutput']
+    exec(compile(ast.Module(body=output_nodes, type_ignores=[]), str(output_source), 'exec'), namespace)
+    def invoke(node, *args, **kwargs):
+        node.clock = extra_globals.get('time', time)
+        if hasattr(node, 'get_logger'):
+            node.diagnostics = node.get_logger()
+        if hasattr(node, 'waypoint_pub'):
+            node.output = namespace['RosTrajectoryOutput'](node.waypoint_pub)
+        return namespace[name](node, *args, **kwargs)
+    return invoke
 
 
 def test_node_reports_utility_removing_all_candidates():
@@ -282,7 +304,7 @@ def test_vehicle_viewpoint_places_rotated_mount_at_requested_camera_position():
     camera = np.array([5., 8., -3.])
     target = np.array([4., 10., -4.])
     offset = np.array([.35, .1, -.25])
-    source = ROOT / 'python_planner/planner_node.py'
+    source = ROOT / 'python_planner/use_cases/mission.py'
     helpers = [node for node in ast.parse(source.read_text()).body
                if isinstance(node, ast.FunctionDef) and node.name in ('body_rotation', 'vehicle_viewpoint')]
     namespace = dict(np=np, math=math)

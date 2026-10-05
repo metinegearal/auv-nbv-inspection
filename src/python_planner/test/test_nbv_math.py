@@ -9,7 +9,7 @@ import pytest
 from scipy.spatial import KDTree
 
 
-source = Path(__file__).parents[1] / 'python_planner' / 'get_NBV.py'
+source = Path(__file__).parents[1] / 'python_planner' / 'use_cases/nbv.py'
 names = {'calculate_pca_complexity', 'detect_frontiers', 'cluster_frontiers',
          'evaluate_viewpoint'}
 tree = ast.parse(source.read_text())

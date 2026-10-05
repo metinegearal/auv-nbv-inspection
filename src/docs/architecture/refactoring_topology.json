@@ -1,0 +1,139 @@
+{
+  "dependencies": {
+    "motion_control": [],
+    "auv_contracts": [],
+    "auv_experiments": [
+      "auv_contracts",
+      "benchmark_evaluator",
+      "bringup"
+    ],
+    "active_inspection_planner": [],
+    "sim_bridge": [
+      "auv_contracts"
+    ],
+    "benchmark_evaluator": [
+      "auv_contracts",
+      "telemetry_adapters"
+    ],
+    "python_planner": [
+      "auv_contracts",
+      "telemetry_adapters"
+    ],
+    "bringup": [
+      "benchmark_evaluator",
+      "motion_control",
+      "perception",
+      "python_planner",
+      "sim_bridge"
+    ],
+    "perception": [
+      "auv_contracts",
+      "telemetry_adapters"
+    ],
+    "telemetry_adapters": [
+      "auv_contracts"
+    ]
+  },
+  "metrics": {
+    "active_inspection_planner": {
+      "fan_in": 0,
+      "fan_out": 0,
+      "Na": 9,
+      "Nc": 31,
+      "I": 0.0,
+      "A": 0.2903225806451613,
+      "D": 0.7096774193548387,
+      "conditional": true
+    },
+    "auv_contracts": {
+      "fan_in": 6,
+      "fan_out": 0,
+      "Na": 17,
+      "Nc": 27,
+      "I": 0.0,
+      "A": 0.6296296296296297,
+      "D": 0.37037037037037035,
+      "conditional": false
+    },
+    "auv_experiments": {
+      "fan_in": 0,
+      "fan_out": 3,
+      "Na": 0,
+      "Nc": 2,
+      "I": 1.0,
+      "A": 0.0,
+      "D": 0.0,
+      "conditional": false
+    },
+    "benchmark_evaluator": {
+      "fan_in": 2,
+      "fan_out": 2,
+      "Na": 2,
+      "Nc": 9,
+      "I": 0.5,
+      "A": 0.2222222222222222,
+      "D": 0.2777777777777778,
+      "conditional": false
+    },
+    "bringup": {
+      "fan_in": 1,
+      "fan_out": 5,
+      "Na": 0,
+      "Nc": 0,
+      "I": 0.8333333333333334,
+      "A": 0.0,
+      "D": 0.16666666666666663,
+      "conditional": true
+    },
+    "motion_control": {
+      "fan_in": 1,
+      "fan_out": 0,
+      "Na": 9,
+      "Nc": 25,
+      "I": 0.0,
+      "A": 0.36,
+      "D": 0.64,
+      "conditional": false
+    },
+    "perception": {
+      "fan_in": 1,
+      "fan_out": 2,
+      "Na": 1,
+      "Nc": 23,
+      "I": 0.6666666666666666,
+      "A": 0.043478260869565216,
+      "D": 0.2898550724637682,
+      "conditional": false
+    },
+    "python_planner": {
+      "fan_in": 1,
+      "fan_out": 2,
+      "Na": 0,
+      "Nc": 8,
+      "I": 0.6666666666666666,
+      "A": 0.0,
+      "D": 0.33333333333333337,
+      "conditional": false
+    },
+    "sim_bridge": {
+      "fan_in": 1,
+      "fan_out": 1,
+      "Na": 4,
+      "Nc": 11,
+      "I": 0.5,
+      "A": 0.36363636363636365,
+      "D": 0.13636363636363635,
+      "conditional": false
+    },
+    "telemetry_adapters": {
+      "fan_in": 3,
+      "fan_out": 1,
+      "Na": 0,
+      "Nc": 3,
+      "I": 0.25,
+      "A": 0.0,
+      "D": 0.75,
+      "conditional": false
+    }
+  }
+}
