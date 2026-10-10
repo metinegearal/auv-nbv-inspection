@@ -1,54 +1,77 @@
 waypoint_control_node:
   ros__parameters:
-    kp_yaw: 0.6
+    kp_yaw: 0.5
     kp_dist: 0.75
     dvl_active: true
-    stopping_distance: 0.25
-    initial_waypoint_x: 10.0
-    initial_waypoint_y: 10.0
-    initial_waypoint_z: 5.0
+    stopping_distance: 0.4
+    initial_waypoint_x: 354.0
+    initial_waypoint_y: 828.0
+    initial_waypoint_z: -298.0
+    initial_waypoint_yaw: 0.0
     max_yaw_command: 10.0
+    yaw_smoothing_rate: 0.8
     min_forward_thrust: 1.0
-    max_forward_thrust: 10.0
-    command_multiplier: 2.0
-
-point_extract:
-  ros__parameters:
-    look_ahead_pixels: 100
-    angle_weight: 0.5
+    max_forward_thrust: 8.0
+    command_multiplier: 5.0
 
 point_iterator:
   ros__parameters:
     camera_x: 0.35
     camera_y: 0.3875
     camera_z: -0.5
-    initial_waypoint_x: -16.0
-    initial_waypoint_y: -81.0
-    initial_waypoint_z: -30.0
+    initial_waypoint_x: 354.0
+    initial_waypoint_y: 828.0
+    initial_waypoint_z: -298.0
     initial_waypoint_yaw: 0.0
     timer_period_s: 1.0
-    waypoint_reached_distance: 0.4
+    waypoint_reached_distance: 0.5
 
 planner_node:
   ros__parameters:
-    voxel_resolution: 0.1
-    max_depth: 3.0
+    voxel_resolution: 0.2
+    max_depth: 5.0
     min_depth: 0.5
-    z_min_target: -32.0
+    z_min_target: -300.0
     depth_stride: 4
     depth_scale: 1.0
-    planning_period: 10
-    min_utility_threshold: 0.01
+    planning_period: 100
+    replan_on_target_arrival: true
+    min_utility_threshold: 0.1
     collision_radius: 0.3
+    # Extra clearance for the controller's 0.4 m waypoint completion tolerance.
+    collision_tracking_margin: 0.4
     trajectory_points: 300
     waypoint_spacing: 0.5
+    trajectory_optimization_enabled: false
+    velocity_history_window: 1.0
+    trajectory_history_window: 5.0
+    trajectory_continuity_weight: 8.0
+    trajectory_reversal_weight: 4.0
+    trajectory_history_weight: 2.0
+    trajectory_history_radius: 0.5
+    trajectory_max_deviation: 0.5
+    trajectory_optimizer_max_iterations: 40
     octomap_path: results/final_map_ros2.bt
-    visit_radius: 0.25
+    visit_radius: 0.5
     results_dir: results
+    use_incremental_map_cache: true
+    # Log every NBV filter, candidate rejection, and planning result to ROS and JSONL.
+    nbv_filter_logging: true
+    
+    # NBV geometry, sampling, and scoring live in nbv_params.yaml.
+    
+    astar_max_steps: 50000
+    # Skip an actually failed target briefly, then allow another attempt.
+    route_blacklist_cooldown_s: 30.0
+    spline_smoothing: 2.0
+    collision_check_spacing_factor: 0.5
+    arrival_target_radius: 2.5
 
 run_baselines:
   ros__parameters:
     results_dir: results
+    # Draw the reference rectangles and pipes in the trajectory overview.
+    show_reference_objects: false
 
 depth_estimation:
   ros__parameters:

@@ -13,7 +13,6 @@
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>benchmark_evaluator</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
@@ -21,6 +20,9 @@
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-open3d</exec_depend>
+
+  <exec_depend>auv_contracts</exec_depend>
+  <exec_depend>telemetry_adapters</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

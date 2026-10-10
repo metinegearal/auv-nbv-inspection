@@ -1,0 +1,123 @@
+{
+    "name": "test_rgb_camera",
+    "world": "TestWorld",
+    "package_name": "BauRov",
+    "main_agent": "auv0",
+    "ticks_per_sec": 30,
+    "agents": [
+        {
+            "agent_name": "auv0",
+            "agent_type": "HoveringAUV",
+            "sensors": [
+                {
+                    "sensor_type": "DVLSensor",
+                    "configuration": {
+                        "Elevation": 22.5,
+                        "DebugLines": false,
+                        "VelSigma": 0.001,
+                        "ReturnRange": true,
+                        "MaxRange": 50.0,
+                        "RangeSigma": 0.05
+                    }
+                },
+                {
+                    "sensor_type": "DepthSensor",
+                    "configuration": {
+                        "Sigma": 0.05
+                    }
+                },
+                {
+                    "sensor_type": "RangeFinderSensor",
+                    "socket": "CameraLeftSocket",
+                    "rotation": [0, 45, 0],
+                    "location": [0, 0.275, -0.5],
+                    "configuration": {
+                        "LaserMaxDistance": 30.0,
+                        "LaserCount": 1,
+                        "LaserAngle": 0,
+                        "LaserDebug": false
+                    }
+                },
+                {
+                    "sensor_type": "MagnetometerSensor",
+                    "configuration": {
+                        "Sigma": 0.0003
+                    }
+                },
+                {
+                    "sensor_type": "IMUSensor",
+                    "configuration": {
+                        "AngVelSigma": 0.0035,
+                        "AccelSigma": 0.03,
+                        "AngVelBiasSigma": 0.001,
+                        "AccelBiasSigma": 0.01
+                    }
+                },
+                {
+                    "sensor_type": "LocationSensor"
+                },
+                {
+                    "sensor_type": "CameraSensor",
+                    "sensor_name": "DownCamera",
+                    "socket": "CameraLeftSocket",
+                    "rotation": [0, 45, 0],
+                    "location": [0, 0.275, -0.5],
+                    "configuration": {
+                        "CaptureWidth": 512,
+                        "CaptureHeight": 512,
+                        "FovAngle": 90.0,
+                        "TargetGamma": 1.0,
+                        "ExposureMethod": "AEM_Histogram",
+                        "ExposureCompensation": 1,
+                        "ShutterSpeed": 60.0,
+                        "ISO": 800.0,
+                        "Aperature": 2.0,
+                        "FocalDistance": 100.0,
+                        "DepthBlurAmount": 1.2,
+                        "DepthBlurRadius": 1.0,
+                        "BladeCount": 6,
+                        "DepthOfFieldMinFstop": 1.4,
+                        "WhiteTemp": 4800.0,
+                        "WhiteTint": 0.25,
+                        "BloomIntensity": 1.8,
+                        "LensFlareIntensity": 1.0,
+                        "ExposureSpeedDown": 3.0,
+                        "ExposureSpeedUp": 2.0
+                    }
+                },
+                {
+                    "sensor_type": "CameraSensor",
+                    "socket": "CameraRightSocket",
+                    "sensor_name": "FrontCamera",
+                    "rotation": [0, 45, 0],
+                    "location": [0, 0, -0.5],
+                    "configuration": {
+                        "CaptureWidth": 512,
+                        "CaptureHeight": 512,
+                        "FovAngle": 90.0,
+                        "TargetGamma": 1.0,
+                        "ExposureMethod": "AEM_Histogram",
+                        "ExposureCompensation": 1,
+                        "ShutterSpeed": 60.0,
+                        "ISO": 800.0,
+                        "Aperature": 2.0,
+                        "FocalDistance": 100.0,
+                        "DepthBlurAmount": 1.2,
+                        "DepthBlurRadius": 1.0,
+                        "BladeCount": 6,
+                        "DepthOfFieldMinFstop": 1.4,
+                        "WhiteTemp": 4800.0,
+                        "WhiteTint": 0.25,
+                        "BloomIntensity": 1.8,
+                        "LensFlareIntensity": 1.0,
+                        "ExposureSpeedDown": 3.0,
+                        "ExposureSpeedUp": 2.0
+                    }
+                }
+            ],
+            "control_scheme": 0,
+            "location": [-19, -85, -29],
+            "rotation": [0, 0, 0]
+        }
+    ]
+}

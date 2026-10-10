@@ -1,42 +1,15 @@
-#ifndef SEARCH_ALGO_HPP
-#define SEARCH_ALGO_HPP
+#pragma once
+#include "active_inspection_planner/domain/search.hpp"
+#include <iostream>
 
-#include <vector>
-#include <unordered_set>
-#include <tuple>
-#include <cmath>
-#include <queue>
-#include <Eigen/Dense>
-
-// Voxel Index Structure and Hash for O(1) lookups
-struct VoxelIdx {
-    int x, y, z;
-    bool operator==(const VoxelIdx& o) const { return x == o.x && y == o.y && z == o.z; }
-};
-
-struct VoxelHash {
-    std::size_t operator()(const VoxelIdx& k) const {
-        return ((std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1)) >> 1) ^ (std::hash<int>()(k.z) << 1);
-    }
-};
-
-using VoxelSet = std::unordered_set<VoxelIdx, VoxelHash>;
-
-class SearchAlgo {
+// Preserve the original standalone API and its stderr diagnostics at the outer boundary.
+class SearchAlgo : public SearchPolicy {
 public:
-    static std::vector<Eigen::Vector3d> astar_3d(
-        const Eigen::Vector3d& start_pos, 
-        const Eigen::Vector3d& goal_pos, 
-        const VoxelSet& occ_set, 
-        double res, 
-        int max_steps = 50000);
-
-    static bool check_line_of_sight(
-        const Eigen::Vector3d& p_start, 
-        const Eigen::Vector3d& p_end, 
-        const VoxelSet& occ_set, 
-        double res, 
-        int gap_multiplier = 4);
+  static std::vector<Eigen::Vector3d> astar_3d(
+    const Eigen::Vector3d & start, const Eigen::Vector3d & goal,
+    const VoxelSet & occupied, double resolution, int max_steps = 50000)
+  {
+    return SearchPolicy::astar_3d(start, goal, occupied, resolution, max_steps,
+             [](const std::string & message) {std::cerr << message;});
+  }
 };
-
-#endif

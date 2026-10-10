@@ -1,5 +1,5 @@
-from .compute_depth import compute_stereo_depth
-from .compute_depth import get_last_depth_timings
+from .compute_depth import create_depth_use_case
+from auv_contracts.values import CameraCalibration
 from std_msgs.msg import Float32, Header, Float32MultiArray
 import rclpy
 from rclpy.node import Node
@@ -10,7 +10,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
-from benchmark_evaluator.midrun_logger import MidrunLogger
+from telemetry_adapters.file_sinks import PipelineFileSink
 
 # NEW: Import message_filters for stereo synchronization
 import message_filters
@@ -19,6 +19,8 @@ class obstacleAvoidance(Node):
     def __init__(self):
         super().__init__('object_detector_node')
 
+        self.depth_use_case = create_depth_use_case()
+        self.calibration = CameraCalibration(256, 0.5)
         self.bridge = CvBridge()
         self.declare_parameter('sync_queue_size', 1)
         self.declare_parameter('sync_slop_s', 0.02)
@@ -26,10 +28,9 @@ class obstacleAvoidance(Node):
         sync_queue_size = int(self.get_parameter('sync_queue_size').value)
         sync_slop_s = float(self.get_parameter('sync_slop_s').value)
         self.frame_id = 0
-        self.telemetry = MidrunLogger(
+        self.telemetry = PipelineFileSink(
             self.get_parameter('results_dir').value,
-            prefix='perception',
-            pipeline_only=True)
+            prefix='perception')
 
         # Optimize QoS to ONLY keep the absolute newest frame (queue size 1)
         # This prevents the node from getting "stuck" processing old backlog frames
@@ -66,26 +67,26 @@ class obstacleAvoidance(Node):
         source_stamp_s = (
             msg_left.header.stamp.sec
             + msg_left.header.stamp.nanosec * 1e-9)
-        
+
         # Convert Left Image
         conversion_started = time.perf_counter()
         frame_left = self.bridge.imgmsg_to_cv2(msg_left, desired_encoding='bgr8')
         frame_left = cv2.cvtColor(frame_left, cv2.COLOR_BGR2RGB)
-        
+
         # Convert Right (Secondary) Image
         frame_right = self.bridge.imgmsg_to_cv2(msg_right, desired_encoding='bgr8')
         frame_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2RGB)
         conversion_ms = (time.perf_counter() - conversion_started) * 1000.0
 
         # Compute Depth
-        depth = compute_stereo_depth(frame_right, frame_left, focal_length_px=256, baseline_meters=0.5)
-        depth_timings = get_last_depth_timings()
+        depth = self.depth_use_case.compute(frame_right, frame_left, self.calibration)
+        depth_timings = self.depth_use_case.timings()
         for stage, duration_ms in depth_timings.items():
             if stage.endswith('_ms'):
                 self.telemetry.record_stage(
                     stage, duration_ms, frame_id=frame_id,
                     source_stamp_s=source_stamp_s)
-        
+
         # Publish using the exact timestamp of the left image to prevent temporal smearing downstream
         publish_started = time.perf_counter()
         self._publish_depth(depth, msg_left.header.stamp)
@@ -112,7 +113,7 @@ class obstacleAvoidance(Node):
                     depth_f = depth_np[:, :, 0].astype(np.float32)
                 else:
                     depth_f = depth_np.astype(np.float32)
-                    
+
                 img_msg = self.bridge.cv2_to_imgmsg(depth_f, encoding='32FC1')
                 # CRITICAL: Pass the timestamp of the original image, not the current time!
                 img_msg.header.stamp = original_stamp

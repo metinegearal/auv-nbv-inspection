@@ -42,6 +42,8 @@ The benchmark logger creates only `benchmark_trajectory.csv`; the planner create
 
 Use the `duration_ms` column to calculate mean, median, and percentile latency. For the actual depth model latency, filter `perception_pipeline_timing.csv` to `stage=inference_ms`. The default synchronizer uses `sync_queue_size: 1`, which drops older image pairs while BGNet is busy. `sync_slop_s` controls the maximum timestamp difference accepted between the two cameras.
 
+The planner uses `use_incremental_map_cache: true` by default. This keeps occupied voxels and collision inflation incrementally, so `octomap_extract` and `collision_inflation` process new voxels instead of rebuilding the full accumulated map. Set it to `false` when exact full OctoMap extraction is required for comparison.
+
 ## Changing the camera cone shape
 
 Edit the `Wedge` call in `src/benchmark_evaluator/benchmark_evaluator/midrun_logger.py`:
