@@ -1,14 +1,30 @@
+import argparse
+import csv
+from pathlib import Path
+import sys
+
 import numpy as np
 import open3d as o3d
 from scipy.spatial import KDTree
-from sklearn.cluster import DBSCAN
-import matplotlib.pyplot as plt
 import pyoctomap as octomap
+
+PROJECT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_DIR / "src" / "python_planner"))
+from python_planner.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
+from python_planner.use_cases.nbv import (
+    calculate_pca_complexity, detect_frontiers, cluster_frontiers,
+    generate_cone_viewpoints, evaluate_viewpoint, calculate_kinematic_cost,
+    normalize_array, select_upward_view_axis,
+)
+from python_planner.route_planning import (
+    inflate_occupied, plan_multi_waypoint_route, generate_smooth_trajectory,
+    resample_trajectory_by_distance, path_is_collision_free,
+)
 
 # ==========================================
 # 1. SYNTHETIC ENVIRONMENT (WITH HOLE & AUV)
 # ==========================================
-def load_real_octomap(filepath, auv_pos):
+def load_real_octomap(filepath, auv_pos, return_map=False):
     """Loads a real .bt OctoMap file and prepares it for NBV math."""
     print(f"Loading OctoMap from: {filepath}")
     
@@ -23,23 +39,32 @@ def load_real_octomap(filepath, auv_pos):
     points = np.asarray(occupied_points)
     
     # 1. Filter out the seafloor (e.g., Z < -31.5) so we only evaluate the pipe
-    z_min_target = -3000
+    z_min_target = DEFAULT_NBV_PARAMETERS['z_min_target']
     pipe_points = points[points[:, 2] > z_min_target]
     
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pipe_points)
     
     # 2. Clean up floating noise (critical to prevent fake frontiers)
-    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=15, std_ratio=1.5)
+    pcd = pcd.voxel_down_sample(DEFAULT_NBV_PARAMETERS['voxel_downsample_size'])
+    pcd, _ = pcd.remove_statistical_outlier(
+        nb_neighbors=DEFAULT_NBV_PARAMETERS['outlier_neighbors'],
+        std_ratio=DEFAULT_NBV_PARAMETERS['outlier_std_ratio'])
+    if len(pcd.points) < 40:
+        raise ValueError("Fewer than 40 surface points remain after preprocessing.")
     
     # 3. Estimate Normals
     # We use a slightly larger radius (0.4m) to smooth out the blocky OctoMap voxels
-    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.4, max_nn=30))
+    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
+        radius=DEFAULT_NBV_PARAMETERS['normal_radius'],
+        max_nn=DEFAULT_NBV_PARAMETERS['normal_max_neighbors']))
     
     # 4. Orient Normals Outward
     # By giving Open3D the AUV's position, it ensures normals face the cameras
     pcd.orient_normals_towards_camera_location(auv_pos)
     
+    if return_map:
+        return pcd, points, tree.getResolution()
     return pcd
 
 def generate_synthetic_pipe_with_hole(radius=1.0, length=5.0, density=3000):
@@ -70,427 +95,265 @@ def generate_synthetic_pipe_with_hole(radius=1.0, length=5.0, density=3000):
     
     return pcd
 
-AUV_POSITION = np.array([3.0, 2.0, 2.5])
-
-# ==========================================
-# 2. FRONTIER DETECTION & COMPLEXITY
-# ==========================================
-def calculate_pca_complexity(pcd, k=20):
-    points = np.asarray(pcd.points)
-    tree = KDTree(points)
-    complexities = np.zeros(len(points))
-    
-    for i, pt in enumerate(points):
-        _, idxs = tree.query(pt, k=k)
-        neighbors = points[idxs]
-        centered = neighbors - np.mean(neighbors, axis=0)
-        cov = np.cov(centered.T)
-        eigenvalues = np.sort(np.linalg.eigvalsh(cov))[::-1]
-        
-        if np.sum(eigenvalues) > 0:
-            complexities[i] = eigenvalues[2] / np.sum(eigenvalues)
-    return complexities
-
-def detect_frontiers(pcd, k=30, angle_threshold_deg=120):
-    points = np.asarray(pcd.points)
-    normals = np.asarray(pcd.normals)
-    tree = KDTree(points)
-    
-    frontier_indices = []
-    angle_threshold = np.radians(angle_threshold_deg)
-    
-    for i in range(len(points)):
-        pt = points[i]
-        n = normals[i]
-        _, neighbor_idxs = tree.query(pt, k=k)
-        neighbors = points[neighbor_idxs]
-        
-        u = np.cross(n, np.array([0, 0, 1]))
-        if np.linalg.norm(u) < 1e-4:
-            u = np.cross(n, np.array([0, 1, 0]))
-        u = u / np.linalg.norm(u)
-        v = np.cross(n, u)
-        
-        angles = []
-        for n_pt in neighbors:
-            vec = n_pt - pt
-            dist = np.linalg.norm(vec)
-            if dist < 1e-5: continue
-            angles.append(np.arctan2(np.dot(vec, v), np.dot(vec, u)))
-            
-        if not angles: continue
-        angles.sort()
-        angles.append(angles[0] + 2 * np.pi)
-        
-        if np.max(np.diff(angles)) > angle_threshold:
-            frontier_indices.append(i)
-            
-    return frontier_indices
-
-# ==========================================
-# 3. CLUSTERING (NOW RETURNS RICH DATA)
-# ==========================================
-def cluster_frontiers(points, normals, frontier_indices, fov_radius=1.0, max_angle_deg=45, min_samples=5):
-    """
-    Visibility-Aware Clustering.
-    Groups frontiers ONLY if they fit within a camera's footprint AND face the same direction.
-    Prevents the DBSCAN 'chaining effect' where giant continuous frontiers become one impossible target.
-    """
-    if not frontier_indices:
-        return []
-
-    frontier_pts = points[frontier_indices]
-    frontier_norms = normals[frontier_indices]
-
-    unassigned = list(range(len(frontier_pts)))
-    clusters = []
-    cluster_id = 0
-
-    max_angle_rad = np.radians(max_angle_deg)
-
-    while unassigned:
-        # Pick the first available point as a seed for a new cluster
-        seed_idx = unassigned[0]
-        seed_pt = frontier_pts[seed_idx]
-        seed_norm = frontier_norms[seed_idx]
-
-        cluster_mask = []
-        new_unassigned = []
-
-        # Check every remaining point against the seed's Field of View
-        for idx in unassigned:
-            pt = frontier_pts[idx]
-            norm = frontier_norms[idx]
-
-            # 1. Spatial Check: Does it physically fit inside the camera's view footprint?
-            dist = np.linalg.norm(pt - seed_pt)
-
-            # 2. Angular Check: Is it facing the same direction as the seed?
-            cos_theta = np.clip(np.dot(seed_norm, norm), -1.0, 1.0)
-            angle = np.arccos(cos_theta)
-
-            if dist <= fov_radius and angle <= max_angle_rad:
-                cluster_mask.append(idx)
-            else:
-                new_unassigned.append(idx)
-
-        # Move forward with the points that didn't fit in this cluster
-        unassigned = new_unassigned
-
-        # Filter out noise (clusters that are too small to waste a waypoint on)
-        if len(cluster_mask) < min_samples:
-            continue
-
-        # Extract the accepted cluster data
-        c_pts = frontier_pts[cluster_mask]
-        c_norms = frontier_norms[cluster_mask]
-        c_indices = np.array(frontier_indices)[cluster_mask]
-
-        centroid = np.mean(c_pts, axis=0)
-
-        # Calculate the average normal of the cluster boundary
-        avg_normal = np.mean(c_norms, axis=0)
-        avg_normal = avg_normal / np.linalg.norm(avg_normal)
-
-        clusters.append({
-            'id': cluster_id,
-            'centroid': centroid,
-            'avg_normal': avg_normal,
-            'points': c_pts,
-            'normals': c_norms,
-            'global_indices': c_indices
-        })
-        cluster_id += 1
-
-    return clusters
-
-# ==========================================
-# 4. VIEWPOINT GENERATION & EVALUATION
-# ==========================================
-def generate_cone_viewpoints(target_pt, normal, standoff=1.5, polar_angles_deg=[15, 30], azimuth_steps=8):
-    """
-    Generates a 3D dome of candidate viewpoints around the target's normal.
-    Uses spherical coordinates to sample a perfect cone of cameras.
-    """
-    normal = normal / np.linalg.norm(normal)
-    
-    # 1. Create a local orthonormal basis (tangent plane)
-    u = np.cross(normal, np.array([0, 0, 1]))
-    if np.linalg.norm(u) < 1e-4:
-        u = np.cross(normal, np.array([0, 1, 0]))
-    u = u / np.linalg.norm(u)
-    v = np.cross(normal, u)
-    
-    candidates = []
-    
-    # 2. Add the direct "straight-on" view (0 degrees polar)
-    candidates.append({
-        'position': target_pt + (normal * standoff),
-        'polar': 0.0,
-        'azimuth': 0.0
-    })
-    
-    # 3. Generate rings of viewpoints
-    # azimuth_steps=8 means it will check 0, 45, 90, 135, 180, 225, 270, 315 degrees around the circle
-    azimuth_angles = np.linspace(0, 360, azimuth_steps, endpoint=False)
-    
-    for polar_deg in polar_angles_deg:
-        polar_rad = np.radians(polar_deg)
-        sin_p = np.sin(polar_rad)
-        cos_p = np.cos(polar_rad)
-        
-        for az_deg in azimuth_angles:
-            az_rad = np.radians(az_deg)
-            
-            # Spherical to Cartesian mapping in the local frame
-            x_local = sin_p * np.cos(az_rad)
-            y_local = sin_p * np.sin(az_rad)
-            z_local = cos_p
-            
-            # Project back to global 3D space
-            ray_dir = (x_local * u) + (y_local * v) + (z_local * normal)
-            vp = target_pt + (ray_dir * standoff)
-            
-            candidates.append({
-                'position': vp, 
-                'polar': polar_deg, 
-                'azimuth': az_deg
-            })
-            
-    return candidates
-
-def evaluate_viewpoint(vp_pos, cluster_pts, cluster_normals, cluster_complexities):
-    """
-    Math: Score = Sum( Incidence_Angle * (1 + Complexity_Weight * PCA_Complexity) )
-    This rewards looking directly at highly complex/rough areas.
-    """
-    total_score = 0.0
-    
-    for pt, norm, comp in zip(cluster_pts, cluster_normals, cluster_complexities):
-        ray = pt - vp_pos
-        dist = np.linalg.norm(ray)
-        if dist < 1e-4: continue
-        ray_dir = ray / dist
-        
-        # 1. Incidence Angle (Camera looking at surface normal)
-        # We want the ray to be exactly opposite to the normal for a perfect view (cos = 1)
-        cos_theta = np.clip(np.dot(-ray_dir, norm), 0.0, 1.0)
-        
-        # 2. Geometric Complexity Multiplier
-        # If the point is rough/complex (comp > 0), it becomes more valuable to look at
-        complexity_weight = 15.0 
-        info_value = 1.0 + (complexity_weight * comp)
-        
-        # Add to total cluster score
-        total_score += (cos_theta * info_value)
-        
-    return total_score
-
-# ==========================================
-# 5. KINEMATIC COST & UTILITY SCORING
-# ==========================================
-def calculate_kinematic_cost(auv_pos, auv_heading, vp_pos, target_pos, pcd_tree):
-    """
-    Calculates the physical cost of moving the AUV to a viewpoint.
-    Cost = (Path Length) + (Orientation Time/Energy) + (Collision Risk)
-    """
-    # 1. Path Length (Translational Energy)
-    travel_vec = vp_pos - auv_pos
-    dist = np.linalg.norm(travel_vec)
-    
-    # 2. Reorientation Cost (Rotational Energy/Time)
-    if dist > 1e-4:
-        travel_dir = travel_vec / dist
-        cos_turn1 = np.clip(np.dot(auv_heading, travel_dir), -1.0, 1.0)
-        turn1_angle = np.arccos(cos_turn1)
+def load_latest_trajectory(results_dir, csv_path=None):
+    """Read the newest recorded trajectory, accepting both CSV header styles."""
+    if csv_path is None:
+        candidates = sorted(results_dir.glob("trajectory_benchmark_*.csv"), reverse=True)
+        if not candidates:
+            candidates = [results_dir / "benchmark_trajectory.csv",
+                          results_dir / "planner_trajectory.csv"]
+        candidates = [path for path in candidates if path.is_file()]
     else:
-        turn1_angle = 0.0
-        
-    view_vec = target_pos - vp_pos
-    view_dist = np.linalg.norm(view_vec)
-    
-    if view_dist > 1e-4 and dist > 1e-4:
-        view_dir = view_vec / view_dist
-        cos_turn2 = np.clip(np.dot(travel_dir, view_dir), -1.0, 1.0)
-        turn2_angle = np.arccos(cos_turn2)
-    else:
-        turn2_angle = 0.0
-        
-    total_rotation = turn1_angle + turn2_angle
-    
-    # 3. Collision Risk (Proximity to the nearest pipe surface)
-    nearest_dist, _ = pcd_tree.query(vp_pos, k=1)
-    # Penalize heavily if we get within 0.5 meters of the pipe
-    collision_risk = 1.0 / (nearest_dist + 0.1) if nearest_dist < 0.8 else 0.0
-    
-    # Weighted Sum of Costs (Tune these weights based on AUV battery vs speed priorities)
-    w_dist, w_rot, w_col = 1.0, 0.5, 2.0
-    raw_cost = (w_dist * dist) + (w_rot * total_rotation) + (w_col * collision_risk)
-    
-    return raw_cost, dist, np.degrees(total_rotation), collision_risk
+        candidates = [Path(csv_path)]
 
-def normalize_array(arr):
-    """Min-Max Normalization to scale arrays perfectly between 0.0 and 1.0."""
-    arr = np.array(arr)
-    val_min, val_max = arr.min(), arr.max()
-    if val_max - val_min < 1e-6:
-        return np.zeros_like(arr)
-    return (arr - val_min) / (val_max - val_min)
+    for path in candidates:
+        positions = []
+        with path.open(newline="") as stream:
+            reader = csv.DictReader(stream)
+            fields = {name.lower(): name for name in (reader.fieldnames or [])}
+            if not all(name in fields for name in ("x_m", "y_m", "z_m")):
+                raise ValueError(f"Missing trajectory coordinates in {path}")
+            for row_number, row in enumerate(reader, start=2):
+                try:
+                    point = [float(row[fields[name]]) for name in ("x_m", "y_m", "z_m")]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid coordinates in {path}:{row_number}") from exc
+                if not np.all(np.isfinite(point)):
+                    raise ValueError(f"Non-finite coordinates in {path}:{row_number}")
+                positions.append(point)
+        if positions:
+            return path, np.asarray(positions)
+    raise ValueError(f"No recorded trajectory points found in {results_dir}")
 
-# ==========================================
-# MAIN EXECUTION & VISUALIZATION
-# ==========================================
-if __name__ == "__main__":
-    print("Generating environment...")
-    # Real AUV coordinates at the start of the pipeline
-    # AUV_POSITION = np.array([-14.054,-82.086,-29.828])
-    AUV_POSITION = np.array([354.0,828.0,-290.0])
-    
-    print("Loading real environment...")
-    map_path = "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/final_map_ros2.bt"
-    pcd = load_real_octomap(map_path, AUV_POSITION)
-    
-    points = np.asarray(pcd.points)
-    normals = np.asarray(pcd.normals)
-    
-    print(f"Loaded {len(points)} valid pipe voxels.")
-    
-    print("Calculating PCA complexity...")
-    complexities = calculate_pca_complexity(pcd)
-    
-    print("Detecting frontiers...")
-    # You might need to tweak k=40 depending on how dense your OctoMap resolution is (0.1m)
-    frontier_indices = detect_frontiers(pcd, k=40, angle_threshold_deg=130)
-    
-    print("Clustering frontiers...")
-    clusters = cluster_frontiers(points, normals, frontier_indices, fov_radius=1.0, max_angle_deg=45)
-    
-    # --- Geometries for Visualization ---
-    pcd.paint_uniform_color([0.5, 0.5, 0.5]) # Gray pipe
-    geometries = [pcd]
-    
-    # AUV Position
-    auv_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.15)
-    auv_sphere.translate(AUV_POSITION)
-    auv_sphere.paint_uniform_color([0, 0.5, 1]) # Blue AUV
-    geometries.append(auv_sphere)
-    
-    # Draw Frontier points
-    if frontier_indices:
-        frontier_pcd = o3d.geometry.PointCloud()
-        frontier_pcd.points = o3d.utility.Vector3dVector(points[frontier_indices])
-        frontier_pcd.paint_uniform_color([1, 0, 0]) # Red frontiers
-        geometries.append(frontier_pcd)
 
-    print(f"\n--- EVALUATING {len(clusters)} CLUSTERS ---")
-    
-    # AUV Current State
-    AUV_HEADING = np.array([1.0, 0.0, 0.0])
-    pcd_tree = KDTree(points) 
-    
-    all_candidates = []
-    
-    # --- PHASE 1: Generate & Raw Score EVERY Single Candidate ---
-    MIN_RAW_GAIN = 2.0 
-    
+def trajectory_yaws(positions):
+    """Estimate viewing yaw from horizontal travel; stationary samples retain yaw."""
+    steps = np.diff(positions[:, :2], axis=0)
+    moving = np.linalg.norm(steps, axis=1) > 1e-4
+    yaws = np.zeros(len(positions))
+    if np.any(moving):
+        first = np.flatnonzero(moving)[0]
+        yaw = np.arctan2(steps[first, 1], steps[first, 0])
+        yaws[0] = yaw
+        for index, step in enumerate(steps, start=1):
+            if moving[index - 1]:
+                yaw = np.arctan2(step[1], step[0])
+            yaws[index] = yaw
+    return yaws
+
+
+def filter_observed_clusters(clusters, trajectory, yaws, parameters):
+    """Apply the planner's distance/yaw coverage rule to recorded trajectory poses."""
+    remaining, observed = [], []
     for cluster in clusters:
-        c_complexities = complexities[cluster['global_indices']]
-        candidates = generate_cone_viewpoints(cluster['centroid'], cluster['avg_normal'], standoff=2.0)
-        
-        for cand in candidates:
-            # 1. Raw Information Gain
-            gain = evaluate_viewpoint(cand['position'], cluster['points'], cluster['normals'], c_complexities)
-            
-            # CRITICAL FIX: Instantly filter out garbage viewpoints
-            if gain < MIN_RAW_GAIN:
-                continue 
-            
-            # 2. Raw Kinematic Cost
-            cost, dist, rot_deg, risk = calculate_kinematic_cost(
-                AUV_POSITION, AUV_HEADING, cand['position'], cluster['centroid'], pcd_tree
-            )
-            
-            all_candidates.append({
-                'cluster_id': cluster['id'],
-                'target': cluster['centroid'],
-                'position': cand['position'],
-                'polar': cand['polar'],
-                'azimuth': cand['azimuth'],
-                'raw_gain': gain,
-                'raw_cost': cost,
-                'dist': dist,
-                'rot_deg': rot_deg,
-                'risk': risk
-            })
-            
-            # Visualize evaluated candidate (Magenta)
-            cand_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.04)
-            cand_sphere.translate(cand['position'])
-            cand_sphere.paint_uniform_color([1, 0, 1])
-            geometries.append(cand_sphere)
+        vectors = cluster['centroid'] - trajectory
+        distances = np.linalg.norm(vectors, axis=1)
+        angles = np.arctan2(vectors[:, 1], vectors[:, 0]) - yaws
+        yaw_diffs = np.abs(np.arctan2(np.sin(angles), np.cos(angles)))
+        already_visited = np.any(
+            (distances > parameters['visited_min_distance'])
+            & (distances < parameters['visited_max_distance'])
+            & (yaw_diffs < np.radians(parameters['visited_yaw_threshold_deg'])))
+        (observed if already_visited else remaining).append(cluster)
+    return remaining, observed
 
-    # --- PHASE 2: Global Normalization & Utility Calculation ---
-    # We normalize across the ENTIRE pool so a "high cost" is relative to all possible moves
-    gains = [c['raw_gain'] for c in all_candidates]
-    costs = [c['raw_cost'] for c in all_candidates]
-    
-    norm_gains = normalize_array(gains)
-    norm_costs = normalize_array(costs)
-    
-    # Assign utilities and find the best candidate per cluster
-    cluster_winners = {}
-    
-    for i, cand in enumerate(all_candidates):
-        cand['norm_gain'] = norm_gains[i]
-        cand['norm_cost'] = norm_costs[i]
-        cand['utility'] = norm_gains[i] - norm_costs[i] # U = I - C
-        
-        cid = cand['cluster_id']
-        # If this is the first candidate for this cluster, or it has a better utility than the current winner
-        if cid not in cluster_winners or cand['utility'] > cluster_winners[cid]['utility']:
-            cluster_winners[cid] = cand
 
-    # --- PHASE 3: Sequence Winners & Find Global Best ---
-    print("\n--- CLUSTER WINNERS (UTILITY SEQUENCED) ---")
-    
-    global_best_utility = -999.0
-    global_best_winner = None
-    
-    for cid, w in cluster_winners.items():
-        print(f"Cluster {cid:>2} | Polar: {w['polar']:>3.0f}°, Azimuth: {w['azimuth']:>3.0f}° | Util: {w['utility']:>5.2f} "
-              f"(NormGain: {w['norm_gain']:.2f}, NormCost: {w['norm_cost']:.2f}) | "
-              f"Path: {w['dist']:.1f}m, Turn: {w['rot_deg']:.0f}°, Risk: {w['risk']:.2f}")
-        
-        # Visualize cluster winners (Yellow)
-        win_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.08)
-        win_sphere.translate(w['position'])
-        win_sphere.paint_uniform_color([1, 1, 0])
-        geometries.append(win_sphere)
-        
-        if w['utility'] > global_best_utility:
-            global_best_utility = w['utility']
-            global_best_winner = w
+def add_sphere(geometries, position, radius, color):
+    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius)
+    sphere.translate(position)
+    sphere.paint_uniform_color(color)
+    geometries.append(sphere)
 
-    print("\n==================================================")
-    print(f"🌟 GLOBAL BEST TARGET: Cluster {global_best_winner['cluster_id']} (Polar: {global_best_winner['polar']:.0f}°, Azimuth: {global_best_winner['azimuth']:.0f}°) 🌟")
-    print(f"Utility Score: {global_best_winner['utility']:.3f}")
-    print(f"Coordinates:   [{global_best_winner['position'][0]:.2f}, "
-          f"{global_best_winner['position'][1]:.2f}, {global_best_winner['position'][2]:.2f}]")
-    print("==================================================\n")
 
-    # Visualize Global Best (Cyan) and Line of Sight
-    best_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.15)
-    best_sphere.translate(global_best_winner['position'])
-    best_sphere.paint_uniform_color([0, 1, 1]) 
-    geometries.append(best_sphere)
-    
-    line_set = o3d.geometry.LineSet()
-    line_set.points = o3d.utility.Vector3dVector([AUV_POSITION, global_best_winner['position']])
-    line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
-    line_set.colors = o3d.utility.Vector3dVector([[0, 1, 1]])
-    geometries.append(line_set)
+def calculate_future_trajectory(auv_position, auv_yaw, winners, occupied_points, resolution):
+    """Preview the planner's baseline route/spline pipeline on the full map.
 
-    print("Opening Open3D Visualization...")
-    print("Gray: Surface | Red: Frontiers | Blue: AUV | Magenta: Evaluated Cone Points")
-    print("Yellow: Cluster Winners | CYAN: Global Best Utility Next-Best-View")
-    o3d.visualization.draw_geometries(geometries)
+    Uses the baseline settings from domain/configuration.py. The result is an
+    untimed XYZ/yaw preview, using NBV camera positions as route waypoints.
+    """
+    eligible = [winner for winner in winners if winner['utility'] >= 0.005]
+    candidates = [(winner['position'], winner['target']) for winner in eligible]
+    if not candidates:
+        print("Future trajectory: no winners pass the planner's minimum utility.")
+        return np.empty((0, 4))
+    # Preserve raw map obstacles, including points removed during NBV preprocessing.
+    occupied_indices = set(map(tuple, np.floor(occupied_points / resolution).astype(int)))
+    occupied = inflate_occupied(occupied_indices, collision_radius=0.6 + 0.4,
+                               resolution=resolution)
+    route, targets = plan_multi_waypoint_route(
+        auv_position, candidates, occupied, resolution, astar_max_steps=50000,
+        reversal_weight=0.0,
+        candidate_utilities=[winner['utility'] for winner in eligible])
+    if not len(route) or not path_is_collision_free(route, occupied, resolution):
+        print("Future trajectory: no collision-free A* route found.")
+        return np.empty((0, 4))
+
+    options = [(route, targets)]
+    target_changes = np.flatnonzero(np.any(targets != targets[0], axis=1))
+    if len(target_changes) and target_changes[0] >= 4:
+        end = int(target_changes[0])
+        options.append((route[:end], targets[:end]))
+    for option_route, option_targets in options:
+        trajectory = generate_smooth_trajectory(
+            option_route, option_targets, num_points=300,
+            smoothing=2.0, sampling_spacing=0.5)
+        if not len(trajectory):
+            continue
+        trajectory[0, :3], trajectory[-1, :3] = option_route[0], option_route[-1]
+        trajectory[0, 3] = auv_yaw
+        trajectory = resample_trajectory_by_distance(trajectory, 0.5, max_points=300)
+        if path_is_collision_free(trajectory[:, :3], occupied, resolution):
+            length = np.linalg.norm(np.diff(trajectory[:, :3], axis=0), axis=1).sum()
+            print(f"Future trajectory: {len(trajectory)} points, {length:.2f} m; collision checks passed.")
+            return trajectory
+    # For visualization, retain the validated A* polyline when the planner rejects
+    # its spline. This is a route preview, not a controller-ready smooth trajectory.
+    yaw = np.unwrap(np.arctan2(targets[:, 1] - route[:, 1], targets[:, 0] - route[:, 0]))
+    yaw[0] = auv_yaw
+    length = np.linalg.norm(np.diff(route, axis=0), axis=1).sum()
+    print(f"Future trajectory: spline rejected; showing collision-free A* route preview "
+          f"({len(route)} points, {length:.2f} m).")
+    return np.column_stack((route, yaw))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Visualize NBV selection after the latest trajectory.")
+    parser.add_argument("--trajectory-csv", type=Path, help="Override the latest trajectory CSV.")
+    parser.add_argument("--map", type=Path, default=PROJECT_DIR / "results" / "final_map_ros2.bt")
+    parser.add_argument("--no-gui", action="store_true", help="Evaluate without opening Open3D.")
+    parser.add_argument("--future-trajectory", action=argparse.BooleanOptionalAction,
+                        default=False, help="Calculate and show the planner's future path (default: off).")
+    args = parser.parse_args()
+    parameters = DEFAULT_NBV_PARAMETERS
+    trajectory_path, trajectory = load_latest_trajectory(PROJECT_DIR / "results", args.trajectory_csv)
+    yaws = trajectory_yaws(trajectory)
+    auv_position = trajectory[-1].copy()
+    auv_heading = np.array([np.cos(yaws[-1]), np.sin(yaws[-1]), 0.0])
+    print(f"Trajectory: {trajectory_path.name} ({len(trajectory)} points)")
+    print(f"Last point / current AUV position: {auv_position}")
+    print("CSV has no measured yaw: viewing headings are estimated from horizontal travel.")
+
+    pcd, occupied_points, resolution = load_real_octomap(str(args.map), auv_position, return_map=True)
+    points, normals = np.asarray(pcd.points), np.asarray(pcd.normals)
+    print(f"Loaded {len(points)} valid pipe voxels.")
+    complexities = calculate_pca_complexity(pcd, k=parameters['pca_neighbors'])
+    frontier_indices = detect_frontiers(
+        pcd, k=parameters['frontier_neighbors'],
+        angle_threshold_deg=parameters['frontier_angle_threshold_deg'])
+    clusters = cluster_frontiers(
+        points, normals, frontier_indices, fov_radius=parameters['cluster_fov_radius'],
+        max_angle_deg=parameters['cluster_max_angle_deg'],
+        min_samples=parameters['cluster_min_samples'])
+    clusters, observed = filter_observed_clusters(clusters, trajectory, yaws, parameters)
+    print(f"Coverage filter: {len(observed)} observed clusters removed; {len(clusters)} remain.")
+
+    pcd.paint_uniform_color([0.5, 0.5, 0.5])
+    geometries = [pcd]
+    path = o3d.geometry.LineSet()
+    path.points = o3d.utility.Vector3dVector(trajectory)
+    segments = np.column_stack((np.arange(len(trajectory) - 1), np.arange(1, len(trajectory))))
+    path.lines = o3d.utility.Vector2iVector(segments)
+    path.colors = o3d.utility.Vector3dVector(np.tile([0, 0.7, 0], (len(segments), 1)))
+    geometries.append(path)
+    add_sphere(geometries, trajectory[0], 0.1, [0, 0.7, 0])
+    add_sphere(geometries, auv_position, 0.2, [0, 0.5, 1])
+
+    # Show only frontier points belonging to clusters that survived coverage filtering.
+    remaining_indices = [index for cluster in clusters for index in cluster['global_indices']]
+    if remaining_indices:
+        frontiers = o3d.geometry.PointCloud()
+        frontiers.points = o3d.utility.Vector3dVector(points[remaining_indices])
+        frontiers.paint_uniform_color([1, 0, 0])
+        geometries.append(frontiers)
+
+    pcd_tree = KDTree(points)
+    occupied_tree = KDTree(occupied_points)
+    all_candidates = []
+    for cluster in clusters:
+        view_axis = select_upward_view_axis(
+            cluster['centroid'], auv_position, occupied_tree,
+            standoff=parameters['standoff'], azimuth_steps=parameters['view_axis_azimuth_steps'])
+        candidates = generate_cone_viewpoints(
+            cluster['centroid'], view_axis, standoff=parameters['standoff'],
+            polar_angles_deg=parameters['polar_angles_deg'], azimuth_steps=parameters['azimuth_steps'])
+        for candidate in candidates:
+            gain = evaluate_viewpoint(
+                candidate['position'], cluster['points'], cluster['normals'],
+                complexities[cluster['global_indices']], complexity_weight=parameters['complexity_weight'])
+            if gain < parameters['min_raw_gain']:
+                continue
+            cost = calculate_kinematic_cost(
+                auv_position, auv_heading, candidate['position'], cluster['centroid'], pcd_tree,
+                distance_weight=parameters['distance_weight'], rotation_weight=parameters['rotation_weight'],
+                collision_weight=parameters['collision_weight'],
+                collision_distance_threshold=parameters['collision_distance_threshold'],
+                collision_distance_offset=parameters['collision_distance_offset'])
+            all_candidates.append({**candidate, 'cluster_id': cluster['id'],
+                                   'target': cluster['centroid'], 'raw_gain': gain, 'raw_cost': cost})
+            if not args.no_gui:
+                add_sphere(geometries, candidate['position'], 0.04, [1, 0, 1])
+
+    winners = {}
+    ranked = []
+    best = None
+    if all_candidates:
+        gains = normalize_array([candidate['raw_gain'] for candidate in all_candidates])
+        costs = normalize_array([candidate['raw_cost'] for candidate in all_candidates])
+        for candidate, gain, cost in zip(all_candidates, gains, costs):
+            candidate['utility'] = (parameters['utility_gain_weight'] * gain
+                                    - parameters['utility_cost_weight'] * cost)
+            cid = candidate['cluster_id']
+            if cid not in winners or candidate['utility'] > winners[cid]['utility']:
+                winners[cid] = candidate
+        ranked = sorted(winners.values(), key=lambda winner: winner['utility'], reverse=True)
+        for winner in ranked:
+            print(f"Cluster {winner['cluster_id']:>2} | Utility: {winner['utility']:.3f} | "
+                  f"Gain: {winner['raw_gain']:.3f} | Cost: {winner['raw_cost']:.3f}")
+            add_sphere(geometries, winner['position'], 0.08, [1, 1, 0])
+        best = ranked[0]
+        print(f"Global best NBV: cluster {best['cluster_id']} at {best['position']}")
+        add_sphere(geometries, best['position'], 0.15, [0, 1, 1])
+        connection = o3d.geometry.LineSet()
+        connection.points = o3d.utility.Vector3dVector([auv_position, best['position']])
+        connection.lines = o3d.utility.Vector2iVector([[0, 1]])
+        connection.colors = o3d.utility.Vector3dVector([[0, 1, 1]])
+        geometries.append(connection)
+    else:
+        print("No NBV candidates remain after coverage and gain filtering.")
+
+    if args.future_trajectory:
+        print("Calculating future trajectory with python_planner...")
+        future = calculate_future_trajectory(
+            auv_position, yaws[-1], ranked, occupied_points, resolution)
+        if len(future) > 1:
+            future_path = o3d.geometry.LineSet()
+            future_path.points = o3d.utility.Vector3dVector(future[:, :3])
+            segments = np.column_stack((np.arange(len(future) - 1), np.arange(1, len(future))))
+            future_path.lines = o3d.utility.Vector2iVector(segments)
+            future_path.colors = o3d.utility.Vector3dVector(np.tile([1, 0.4, 0], (len(segments), 1)))
+            geometries.append(future_path)
+            add_sphere(geometries, future[-1, :3], 0.12, [1, 0.4, 0])
+
+    if not args.no_gui:
+        print("Gray: Surface | Green: Trajectory/start | Blue: Last point/AUV | Red: Remaining frontiers")
+        print("Magenta: Candidates | Yellow: Cluster winners | Cyan: Global best NBV | Labels: Cluster IDs")
+        if args.future_trajectory:
+            print("Orange: Collision-checked future trajectory/end")
+
+        def add_cluster_labels(visualizer):
+            for winner in winners.values():
+                label_position = winner['position'] + np.array([0.0, 0.0, 0.25])
+                label = f"Cluster {winner['cluster_id']}"
+                if winner is best:
+                    label += " (best)"
+                visualizer.add_3d_label(label_position, label)
+
+        # The GUI visualizer supports screen-facing text anchored to 3D positions.
+        o3d.visualization.draw(
+            geometries, title="NBV cluster winners", raw_mode=True,
+            bg_color=(1.0, 1.0, 1.0, 1.0), show_skybox=False,
+            line_width=3, on_init=add_cluster_labels)
+
+
+if __name__ == "__main__":
+    main()

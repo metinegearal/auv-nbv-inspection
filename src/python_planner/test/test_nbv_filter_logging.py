@@ -120,6 +120,38 @@ def test_empty_pipeline_returns_no_candidates(pipeline, case, reason):
     assert result == []
 
 
+def test_overall_cost_weight_changes_gain_cost_tradeoff(pipeline):
+    ns, points = pipeline
+    ns['generate_cone_viewpoints'] = lambda *args, **kwargs: [
+        dict(position=np.array([0., 0., z])) for z in [1., 2.]]
+    ns['evaluate_viewpoint'] = lambda position, *args, **kwargs: position[2]
+    ns['calculate_kinematic_cost'] = lambda position, heading, viewpoint, *args, **kwargs: viewpoint[2]
+    args = (points, np.zeros(3), np.array([1., 0., 0.]))
+    cost_favored = ns['calculate_nbv_waypoints'](*args, parameters={'utility_cost_weight': 2.})
+    gain_favored = ns['calculate_nbv_waypoints'](*args, parameters={'utility_cost_weight': .5})
+    assert cost_favored[0]['position'][2] == 1.
+    assert gain_favored[0]['position'][2] == 2.
+    assert gain_favored[0]['utility'] == pytest.approx(.5)
+    gain_scaled = ns['calculate_nbv_waypoints'](
+        *args, parameters={'utility_gain_weight': 3., 'utility_cost_weight': 2.})
+    assert gain_scaled[0]['position'][2] == 2.
+    assert gain_scaled[0]['utility'] == pytest.approx(1.)
+
+
+def test_axis_selection_receives_raw_occupied_map_not_cleaned_target(pipeline):
+    ns, points = pipeline
+    raw = np.vstack((points, [0., 0., -10.]))
+    selected = []
+    def axis(target, position, occupied_tree, **kwargs):
+        selected.append(occupied_tree.data.copy())
+        return np.array([1., 0., 1.]) / np.sqrt(2.)
+    ns['select_upward_view_axis'] = axis
+    ns['calculate_nbv_waypoints'](
+        raw, np.zeros(3), np.array([1., 0., 0.]), parameters={'z_min_target': -1.})
+    assert len(selected) == 1
+    np.testing.assert_array_equal(selected[0], raw)
+
+
 def test_timing_preserves_candidates(pipeline):
     ns, points = pipeline
     args = (points, np.zeros(3), np.array([1., 0., 0.]))
@@ -339,9 +371,13 @@ def test_rejected_combined_spline_keeps_checked_first_structural_target(first_sp
             positions = np.vstack((path[0], [2.5, 1.5, .5], path[-1]))
             return np.column_stack((positions, np.zeros(3)))
         return routes.generate_smooth_trajectory(path, tracked, **kwargs)
+    def route_with_utilities(*args, **kwargs):
+        assert kwargs['candidate_utilities'] == [1.]
+        return route, targets
+
     method = node_method('_plan_and_publish', time=time,
                          estimate_velocity=lambda *args: np.zeros(3),
-                         plan_multi_waypoint_route=lambda *args, **kwargs: (route, targets),
+                         plan_multi_waypoint_route=route_with_utilities,
                          generate_smooth_trajectory=spline,
                          resample_trajectory_by_distance=routes.resample_trajectory_by_distance,
                          reconnect_trajectory=routes.reconnect_trajectory)

@@ -16,6 +16,7 @@ DEFAULT_NBV_PARAMETERS = {
     'standoff': 1.5,
     'polar_angles_deg': [15.0, 30.0],
     'azimuth_steps': 8,
+    'view_axis_azimuth_steps': 36,
     'visited_min_distance': 0.1,
     'visited_max_distance': 3.0,
     'visited_yaw_threshold_deg': 30.0,
@@ -25,4 +26,6 @@ DEFAULT_NBV_PARAMETERS = {
     'collision_weight': 2.0,
     'collision_distance_threshold': 0.8,
     'collision_distance_offset': 0.1,
+    'utility_gain_weight': 1.0,
+    'utility_cost_weight': 1.0,
 }

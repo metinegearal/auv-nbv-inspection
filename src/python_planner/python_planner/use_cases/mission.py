@@ -421,6 +421,7 @@ class InspectionMission:
             current_velocity=velocity if self.optimize_motion else None,
             reversal_weight=(float(self.motion_cost_parameters['reversal_weight'])
                              if self.optimize_motion else 0.0),
+            candidate_utilities=[candidate['utility'] for candidate in valid_candidates],
         )
         self.telemetry.record_stage(
             'route_search', (self.clock.perf_counter() - route_started) * 1000.0,
@@ -871,4 +872,3 @@ class InspectionMission:
             self.diagnostics.error(f'Failed to save final map on exit: {e}')
 
         self.evaluation_file.close()
-

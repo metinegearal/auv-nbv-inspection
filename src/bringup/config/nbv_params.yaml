@@ -23,6 +23,9 @@ planner_node:
     nbv_standoff: 1.5
     nbv_polar_angles_deg: [15.0, 30.0]
     nbv_azimuth_steps: 8
+    # Central axis: fixed +45 degree elevation; scan yaw for occupied-map clearance.
+    # Separate from the azimuth sampling of the 15/30 degree candidate cones.
+    nbv_view_axis_azimuth_steps: 36
     nbv_visited_min_distance: 0.1
     nbv_visited_max_distance: 3.5
     nbv_visited_yaw_threshold_deg: 40.0
@@ -37,3 +40,8 @@ planner_node:
     nbv_collision_weight: 2.0
     nbv_collision_distance_threshold: 0.8
     nbv_collision_distance_offset: 0.2
+
+    # Utility = gain_weight * normalized_gain - cost_weight * normalized_cost.
+    # Lower cost_weight (e.g. 0.5) to reduce cost's overall effect.
+    nbv_utility_gain_weight: 1.5
+    nbv_utility_cost_weight: 0.5

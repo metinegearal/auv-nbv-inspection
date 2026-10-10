@@ -121,9 +121,44 @@ def cluster_frontiers(points, normals, frontier_indices, fov_radius=1.0, max_ang
 
     return clusters
 
+def select_upward_view_axis(target_pt, auv_position, occupied_tree,
+                            standoff=1.5, azimuth_steps=36):
+    """Choose yaw by occupied-point clearance with elevation locked to +45 degrees.
+
+    Sample the target-to-viewpoint rays after the first 20% of standoff, where
+    departure from the target surface is expected. Prefer maximum minimum ray
+    clearance, then mean clearance; ties favor yaw toward the AUV. Absence of
+    occupied samples is not proof of observed free space. Route collision checks
+    still determine whether the resulting viewpoints can be reached safely.
+    """
+    if standoff <= 0.0 or azimuth_steps < 1:
+        raise ValueError('standoff and view-axis azimuth_steps must be positive')
+    delta = np.asarray(auv_position) - np.asarray(target_pt)
+    preferred_yaw = np.arctan2(delta[1], delta[0])
+    yaw = preferred_yaw + np.linspace(0.0, 2.0 * np.pi, azimuth_steps, endpoint=False)
+    axes = np.column_stack((np.cos(yaw), np.sin(yaw), np.ones(azimuth_steps))) / np.sqrt(2.0)
+    distances = np.linspace(0.2 * standoff, standoff, 20)
+    samples = np.asarray(target_pt) + axes[:, None, :] * distances[None, :, None]
+    clearances, _ = occupied_tree.query(samples.reshape(-1, 3), k=1)
+    clearances = clearances.reshape(azimuth_steps, -1)
+    minimum = clearances.min(axis=1)
+    eligible = np.flatnonzero(np.isclose(minimum, minimum.max(), rtol=1e-6, atol=1e-9))
+    means = clearances[eligible].mean(axis=1)
+    tied = np.flatnonzero(np.isclose(means, means.max(), rtol=1e-6, atol=1e-9))
+    # Azimuth samples begin at preferred_yaw; break remaining ties by heading.
+    indices = eligible[tied]
+    alignment = np.cos(yaw[indices] - preferred_yaw)
+    return axes[indices[np.argmax(alignment)]]
+
+
 def generate_cone_viewpoints(
         target_pt, normal, standoff=1.5, polar_angles_deg=None,
         azimuth_steps=8):
+    """Generate the central viewpoint and unchanged cone offsets around its axis.
+
+    The historical ``normal`` argument now receives the chosen central axis;
+    actual surface normals remain available for clustering and gain evaluation.
+    """
     if polar_angles_deg is None:
         polar_angles_deg = [15, 30]
     normal = normal / np.linalg.norm(normal)
@@ -237,6 +272,9 @@ def calculate_nbv_waypoints(
     cleaned_points = np.asarray(pcd.points)
     normals = np.asarray(pcd.normals)
     pcd_tree = KDTree(cleaned_points)
+    # Use every occupied map sample for axis selection, including points removed
+    # by target filtering/downsampling. Gain and cost retain their existing data.
+    occupied_tree = KDTree(points_raw)
 
     # 2. Mathematical Pipeline
     complexities = timed('nbv_pca', lambda: calculate_pca_complexity(
@@ -280,9 +318,13 @@ def calculate_nbv_waypoints(
         # THE MISSING MATH BLOCK: Generate & evaluate viewpoints
         # =========================================================
         c_complexities = complexities[cluster['global_indices']]
+        view_axis = select_upward_view_axis(
+            cluster['centroid'], auv_position, occupied_tree,
+            standoff=float(parameters['standoff']),
+            azimuth_steps=int(parameters['view_axis_azimuth_steps']))
         candidates = generate_cone_viewpoints(
             cluster['centroid'],
-            cluster['avg_normal'],
+            view_axis,
             standoff=float(parameters['standoff']),
             polar_angles_deg=parameters['polar_angles_deg'],
             azimuth_steps=int(parameters['azimuth_steps']))
@@ -334,7 +376,8 @@ def calculate_nbv_waypoints(
 
     cluster_winners = {}
     for i, cand in enumerate(all_candidates):
-        cand['utility'] = norm_gains[i] - norm_costs[i]
+        cand['utility'] = (float(parameters['utility_gain_weight']) * norm_gains[i]
+                           - float(parameters['utility_cost_weight']) * norm_costs[i])
         cid = cand['cluster_id']
 
         if cid not in cluster_winners or cand['utility'] > cluster_winners[cid]['utility']:

@@ -136,36 +136,40 @@ def reconnect_trajectory(trajectory, current_position, current_yaw, occupied,
 
 def plan_multi_waypoint_route(current_position, candidates, occupied,
                               resolution, astar_max_steps=50000,
-                              current_velocity=None, reversal_weight=2.0):
-    """Sequence NBV candidates and connect them with collision-safe A*."""
+                              current_velocity=None, reversal_weight=2.0,
+                              candidate_utilities=None):
+    """Connect NBVs with collision-safe A*, visiting higher utilities first.
+
+    Utilities align with candidates. Travel/reversal cost breaks utility ties;
+    omitting utilities preserves distance-based ordering for generic callers.
+    Re-evaluate ordering only from endpoints of successful, validated legs.
+    """
+    utilities = (np.zeros(len(candidates)) if candidate_utilities is None
+                 else np.asarray(candidate_utilities, dtype=float))
+    if utilities.shape != (len(candidates),) or not np.all(np.isfinite(utilities)):
+        raise ValueError('candidate_utilities must contain one finite value per candidate')
     if not candidates:
         return np.empty((0, 3)), np.empty((0, 3))
 
-    remaining = list(candidates)
-    ordered = []
-    position = np.asarray(current_position, dtype=np.float64)
+    remaining = list(zip(candidates, utilities))
+    full_path = []
+    target_tracking = []
+    start = np.asarray(current_position, dtype=np.float64)
     direction = (np.zeros(3) if current_velocity is None
                  else np.asarray(current_velocity, dtype=np.float64))
     if np.linalg.norm(direction) < 0.05:
         direction = np.zeros(3)
     while remaining:
         scores = []
-        for viewpoint, _ in remaining:
-            delta = viewpoint - position
+        for (viewpoint, _), utility in remaining:
+            delta = viewpoint - start
             distance = np.linalg.norm(delta)
             alignment = np.dot(delta, direction) / max(
                 distance * np.linalg.norm(direction), 1e-9)
-            scores.append(distance + reversal_weight * max(0.0, -alignment))
-        index = int(np.argmin(scores))
-        candidate = remaining.pop(index)
-        ordered.append(candidate)
-        direction = candidate[0] - position
-        position = candidate[0]
-
-    full_path = []
-    target_tracking = []
-    start = np.asarray(current_position, dtype=np.float64)
-    for viewpoint, target in ordered:
+            travel_cost = distance + reversal_weight * max(0.0, -alignment)
+            scores.append((-utility, travel_cost))
+        index = min(range(len(remaining)), key=scores.__getitem__)
+        (viewpoint, target), _ = remaining.pop(index)
         segment = astar_3d(
             start, viewpoint, occupied, resolution, max_steps=astar_max_steps)
         if not segment:
@@ -186,9 +190,11 @@ def plan_multi_waypoint_route(current_position, candidates, occupied,
             segment = segment[1:]
         full_path.extend(segment)
         target_tracking.extend([target] * len(segment))
+        direction = viewpoint - start
         start = viewpoint
 
-    return np.asarray(full_path), np.asarray(target_tracking)
+    return (np.asarray(full_path, dtype=float).reshape(-1, 3),
+            np.asarray(target_tracking, dtype=float).reshape(-1, 3))
 
 
 def generate_smooth_trajectory(
