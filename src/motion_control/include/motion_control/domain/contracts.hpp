@@ -19,7 +19,7 @@ struct ControlConfig
 };
 struct QueueConfig
 {
-  const double camera_x, camera_y, camera_z, initial_waypoint_x,
+  const double initial_waypoint_x,
     initial_waypoint_y, initial_waypoint_z, initial_waypoint_yaw,
     timer_period_s, waypoint_reached_distance;
 };

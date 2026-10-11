@@ -1,9 +1,21 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+from bringup.transforms import camera_transform_arguments
+
+
+def camera_transform_node(context, default_file, params_file, enabled):
+    # The standalone publisher requires CLI frame IDs and overrides YAML
+    # parameters internally, so resolve the configured mount into CLI flags.
+    return [Node(
+        package='tf2_ros', executable='static_transform_publisher',
+        name='camera_static_transform', condition=IfCondition(enabled),
+        arguments=camera_transform_arguments(default_file, params_file.perform(context)))]
 
 def generate_launch_description():
     # 1. Set up the default paths (used if no arguments are passed)
@@ -16,6 +28,8 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     nbv_params_file = LaunchConfiguration('nbv_params_file')
     holo_config = LaunchConfiguration('holo_config_file')
+    publish_sim_tf = LaunchConfiguration('publish_sim_tf')
+    publish_camera_tf = LaunchConfiguration('publish_camera_tf')
 
     # 3. Declare the launch arguments so they are exposed to the CLI
     declare_params_file_cmd = DeclareLaunchArgument(
@@ -40,6 +54,19 @@ def generate_launch_description():
         declare_params_file_cmd,
         declare_nbv_params_file_cmd,
         declare_holo_config_cmd,
+        DeclareLaunchArgument('publish_sim_tf', default_value='true',
+                              description='Bridge simulator odometry to TF with identity map to odom'),
+        DeclareLaunchArgument('publish_camera_tf', default_value='true',
+                              description='Publish configured camera mount; disable for URDF/dynamic TF'),
+
+        # HoloOcean odometry is already in global map coordinates.
+        Node(
+            package='tf2_ros', executable='static_transform_publisher',
+            name='map_to_odom', condition=IfCondition(publish_sim_tf),
+            arguments=['--frame-id', 'map', '--child-frame-id', 'odom']
+        ),
+        OpaqueFunction(function=camera_transform_node,
+                       args=[default_config_file, params_file, publish_camera_tf]),
         
         # Now pass the LaunchConfigurations into the nodes instead of the hardcoded strings
         Node(
@@ -71,7 +98,8 @@ def generate_launch_description():
             executable='planner_node',
             name='planner_node',
             # Keep legacy combined/custom params_file overrides authoritative.
-            parameters=[nbv_params_file, params_file]
+            parameters=[{'publish_vehicle_tf': ParameterValue(publish_sim_tf, value_type=bool)},
+                        nbv_params_file, params_file]
         ),
         Node(
             package='benchmark_evaluator',

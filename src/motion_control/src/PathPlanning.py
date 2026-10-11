@@ -76,7 +76,6 @@ class PathPlanner(Node):
         self.waypoints = [
             (-16, -81, -30, 0)
         ]  # ,(-15,-80),(-11,-80),(-11,-90),(-15,-90)]
-        self.camera_position = [0.35, 0.1125 + 0.275, -0.5]
         # self.waypoints = [(56,-119,2)]
         # self.waypoints = [(15,-110,10)] # docking station
         # self.waypoints = [(134,-106,-31.5)] # to the orange flare
@@ -132,9 +131,9 @@ class PathPlanner(Node):
             elif len(wp) == 4:
                 wps.append(
                     (
-                        wp[0] - self.camera_position[0],
-                        wp[1] - self.camera_position[1],
-                        wp[2] - self.camera_position[2],
+                        wp[0],
+                        wp[1],
+                        wp[2],
                         wp[3],
                     )
                 )

@@ -1,0 +1,16 @@
+# Request a trajectory; false trigger values are rejected.
+bool trigger
+# False waits for periodic, arrival, or collision replanning while driving.
+bool force_replan
+---
+# Flat [x, y, z, yaw] vehicle waypoints in frame_id (never camera coordinates).
+float32[] trajectory
+string frame_id
+string message
+uint32 strikes
+bool strikeout
+---
+string state
+string message
+uint32 strikes
+uint32 blacklisted_targets

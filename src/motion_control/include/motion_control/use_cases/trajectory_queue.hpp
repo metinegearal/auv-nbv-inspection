@@ -6,11 +6,7 @@ namespace motion_control
 {
 class TrajectoryQueue {
   WaypointOutput & output_; Diagnostics & diagnostics_;
-  std::vector<double> camera_position_;
   std::vector<std::vector<double>> waypoints_;
-  double camera_position_x_ = 0.35;
-  double camera_position_y_ = 0.1125 + 0.275;
-  double camera_position_z_ = -0.5;
   double initial_waypoint_x_ = -16.0;
   double initial_waypoint_y_ = -81.0;
   double initial_waypoint_z_ = -30.0;
@@ -22,9 +18,6 @@ public:
   TrajectoryQueue(const QueueConfig & config, WaypointOutput & output, Diagnostics & diagnostics)
   : output_(output), diagnostics_(diagnostics)
   {
-    camera_position_x_ = config.camera_x;
-    camera_position_y_ = config.camera_y;
-    camera_position_z_ = config.camera_z;
     initial_waypoint_x_ = config.initial_waypoint_x;
     initial_waypoint_y_ = config.initial_waypoint_y;
     initial_waypoint_z_ = config.initial_waypoint_z;
@@ -32,7 +25,6 @@ public:
     timer_period_s_ = config.timer_period_s;
     waypoint_reached_distance_ = config.waypoint_reached_distance;
         // Initial setup
-    camera_position_ = {camera_position_x_, camera_position_y_, camera_position_z_};
     waypoints_.push_back({
         initial_waypoint_x_, initial_waypoint_y_,
         initial_waypoint_z_, initial_waypoint_yaw_});
@@ -50,15 +42,16 @@ public:
 
   void pointSegment_callback(const WaypointInput & msg)
   {
+    // Action results are already vehicle coordinates in the map frame.
     std::vector<std::vector<double>> wps;
 
         // Replicates numpy.reshape(-1, 4)
     for (size_t i = 0; i + 3 < msg.data.size(); i += 4) {
       diagnostics_.write(format_text("Adding segmentation waypoint..."));
       std::vector<double> wp = {
-        msg.data[i] - camera_position_[0],
-        msg.data[i + 1] - camera_position_[1],
-        msg.data[i + 2] - camera_position_[2],
+        msg.data[i],
+        msg.data[i + 1],
+        msg.data[i + 2],
         msg.data[i + 3]
       };
       wps.push_back(wp);
@@ -71,6 +64,8 @@ public:
       timer_callback();
     }
   }
+
+  void clear() {waypoints_.clear();}
 
   void timer_callback()
   {

@@ -16,9 +16,10 @@ waypoint_control_node:
 
 point_iterator:
   ros__parameters:
-    camera_x: 0.35
-    camera_y: 0.3875
-    camera_z: -0.5
+    world_frame: map
+    nbv_server_timeout_s: 30.0
+    nbv_feedback_timeout_s: 30.0
+    nbv_goal_timeout_s: 120.0
     initial_waypoint_x: 354.0
     initial_waypoint_y: 828.0
     initial_waypoint_z: -298.0
@@ -28,6 +29,9 @@ point_iterator:
 
 planner_node:
   ros__parameters:
+    world_frame: map
+    body_frame: base_link
+    camera_frame: camera_link
     voxel_resolution: 0.2
     max_depth: 5.0
     min_depth: 0.5
@@ -66,6 +70,20 @@ planner_node:
     spline_smoothing: 2.0
     collision_check_spacing_factor: 0.5
     arrival_target_radius: 2.5
+
+# Camera optical axes: X right, Y down, Z forward. This quaternion combines
+# the downward 45 degree mount tilt with the optical-axis convention.
+camera_static_transform:
+  ros__parameters:
+    frame_id: base_link
+    child_frame_id: camera_link
+    translation.x: 0.35
+    translation.y: 0.3875
+    translation.z: -0.5
+    rotation.x: -0.6532814824381883
+    rotation.y: 0.6532814824381883
+    rotation.z: -0.2705980500730985
+    rotation.w: 0.2705980500730985
 
 run_baselines:
   ros__parameters:

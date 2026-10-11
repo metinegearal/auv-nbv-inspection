@@ -19,14 +19,13 @@ struct Output final : motion_control::WaypointOutput, motion_control::Diagnostic
 int main()
 {
   Output output;
-  motion_control::TrajectoryQueue queue({.35, .3875, -.5, 354., 828., -298., 0., 1., .5}, output,
+  motion_control::TrajectoryQueue queue({354., 828., -298., 0., 1., .5}, output,
     output);
   queue.timer_callback();
   require(output.messages.back() == std::vector<float>({354.f, 828.f, -298.f, 0.f}));
   queue.pointSegment_callback({{10.f, 20.f, -30.f, 1.f, 11.f, 21.f, -31.f, 2.f}});
   const auto encoded = output.messages.back();
-  require(encoded.size() == 8 && std::abs(encoded[0] - 9.65f) < 1e-6);
-  require(std::abs(encoded[1] - 19.6125f) < 1e-6 && encoded[2] == -29.5f && encoded[3] == 1.f);
+  require(encoded == std::vector<float>({10.f, 20.f, -30.f, 1.f, 11.f, 21.f, -31.f, 2.f}));
   // Preserve the existing empty-message behavior: the queue retains its route.
   queue.pointSegment_callback({{}});
   queue.timer_callback();
@@ -36,6 +35,11 @@ int main()
   const auto last = output.messages.back();
   queue.stop_callback({{last[0], last[1], last[2]}});
   require(output.requests == 1);
+  queue.pointSegment_callback({{10.f, 20.f, -30.f, 1.f}});
+  queue.clear();
+  const auto before_clear_tick = output.messages.size();
+  queue.timer_callback();
+  require(output.messages.size() == before_clear_tick);
   motion_control::EightThrusterMixer mixer;
   auto mixed = mixer.mix({'w', 'a', 'i'}, 2., std::vector<double>(8, 0.), 3.);
   require(mixed == std::vector<double>({3., 3., 3., 3., 0., -4., 0., -4.}));

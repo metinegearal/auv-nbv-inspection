@@ -1,6 +1,6 @@
 # AUV Exploration Pipeline & Failsafe Mechanics
 
-This documents the current default Python-planner launch. The C++ planner is an alternative. Numerical behavior and topic/wire formats are preserved by the structural refactor.
+This documents the default Python NBV planner and C++ trajectory iterator. NBV computation uses an action; all trajectories contain vehicle coordinates in the map frame.
 
 ## 1. Node Graph & Topic Map
 
@@ -27,20 +27,22 @@ graph TD
     WC -- "/motion/report<br/>(Float32MultiArray)" --> PI
     PI -- "/trajectory/waypoint<br/>(Float32MultiArray)" --> WC
     
-    PI -- "/planner/request_nbv<br/>(std_msgs/Bool)" --> PN
-    PN -- "object/areaWaypoints<br/>(Float32MultiArray)" --> PI
-    PN -- "/movement/finished_execution<br/>(std_msgs/Bool)" --> WC
+    PI -- "/planner/compute_nbv goal<br/>(ComputeNBV action)" --> PN
+    PN -- "ComputeNBV feedback and result" --> PI
+    PN -- "object/areaWaypoints<br/>(collision invalidation only)" --> PI
+    PI -- "/movement/finished_execution<br/>(std_msgs/Bool)" --> WC
     SB -- "holocean/camera/image_raw and holocean/cameraDown/image_raw<br/>(sensor_msgs/Image)" --> DE
     SB -- "holocean/odom and holocean/mag<br/>(Odometry and MagneticField)" --> PN
     SB -- "holocean/cameraDown/image_raw<br/>(RGB readiness)" --> PN
     WC -- "/holo/cmd<br/>(Float32MultiArray, eight values)" --> SB
     SB -- "holocean/odom" --> BE
-    PN -- "object/areaWaypoints and /movement/finished_execution" --> BE
+    PN -- "object/areaWaypoints" --> BE
+    PI -- "/movement/finished_execution" --> BE
 ```
 
 ## 2. The Demand Loop (Sequence Diagram)
 
-The queue (`point_iterator`) republishes the remaining route and requests planning when it becomes empty. A request sets `force_replan`; planning still waits for the `0.5 s` timer and the existing odometry, RGB-readiness and new-depth gates. It does not guarantee immediate movement or uninterrupted control.
+The queue (`point_iterator`) keeps a monitoring action open while executing a route. When the queue empties, it cancels that pending action and requests an immediate replan. Planning waits for the `0.5 s` timer, odometry, RGB readiness, a new depth frame, timestamped camera TF, and an initial map with at least 40 occupied points. These startup waits preserve the request and consume no strikes. The first usable cloud triggers the pending plan immediately. Feedback and watchdog timeouts expose progress and server failure; the computation timeout runs only during `Computing` or `Blacklisting`, while missing feedback is always monitored.
 
 ```mermaid
 sequenceDiagram
@@ -52,14 +54,16 @@ sequenceDiagram
     PI->>PI: Apply XY-distance and exact-match removal rules
     
     alt Queue Empty
-        PI->>PLAN: /planner/request_nbv (True)
+        PI->>PLAN: ComputeNBV goal (trigger=true, force_replan=true)
         note over PLAN: force_replan flag set to True
         note over PLAN: Wait for timer and input gates
         PLAN->>PLAN: _accumulate_depth() through map adapter
         PLAN->>PLAN: calculate_nbv_waypoints()
+        PLAN-->>PI: ComputeNBV feedback (Computing / Blacklisting / strikes)
         PLAN->>PLAN: A* route, spline, optional optimization and collision checks
-        PLAN->>PI: object/areaWaypoints (If safe route succeeds)
+        PLAN->>PI: ComputeNBV SUCCEEDED result (safe vehicle trajectory)
         PI->>PI: Replace queue with nonempty route
+        PI->>PLAN: ComputeNBV goal (force_replan=false, monitor next replan)
     end
     
     PI->>AUV: /trajectory/waypoint (Remaining waypoint array)
@@ -108,11 +112,11 @@ If a failed route identifies a specific target and the cooldown is positive, the
 If the AUV gets stuck in a position where *no* valid candidates can be reached safely, the mission must terminate gracefully rather than looping infinitely.
 *   **Trigger:** A failed safe batch that cannot blacklist a specific target, or a batch with no safe candidates remaining, increments `failed_plan_count`.
 *   **Reset:** If a trajectory is successfully published, `failed_plan_count` resets to `0`.
-*   **Strikeout:** If `failed_plan_count >= 3`, the planner sets `finished_mapping = True` and publishes to `/movement/finished_execution` to bring the AUV to a halt.
+*   **Strikeout:** If `failed_plan_count >= 3`, Python sets `finished_mapping = True` and returns ABORTED with `strikeout=true`. C++ transitions to `MissionComplete`, clears its queue, and publishes `/movement/finished_execution` to halt execution. Other aborts, rejection, malformed results, or timeouts transition to `Failed` and halt execution.
 
-### C. Preserved cancellation mismatch
+### C. Collision cancellation
 
-When newly mapped occupancy blocks the cached active route, the planner clears its cached trajectory and publishes an empty array. **The current queue ignores empty arrays and retains its existing route.** The planner telemetry field `downstream_queue_cleared` expresses an intention rather than an acknowledgement. This pre-existing mismatch is preserved under the no-behavior-change constraint; no revised cancellation protocol was introduced.
+When newly mapped occupancy blocks the cached route, Python clears it and publishes an empty observer array. C++ clears its queue, holds execution using the existing completion signal, and requests an immediate action replan. Only a successful, validated action result resumes execution. Nonempty observer messages cannot install or duplicate routes.
 
 ## 5. Key Configurable Parameters
 

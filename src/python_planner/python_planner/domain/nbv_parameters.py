@@ -1,4 +1,6 @@
 """Existing NBV defaults, owned by the framework-free configuration boundary."""
+MIN_NBV_CLOUD_POINTS = 40
+
 DEFAULT_NBV_PARAMETERS = {
     'z_min_target': -3000.0,
     'pca_neighbors': 20,

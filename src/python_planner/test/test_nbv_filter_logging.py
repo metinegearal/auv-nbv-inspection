@@ -14,6 +14,7 @@ import time
 import numpy as np
 import pytest
 from scipy.spatial import KDTree
+from scipy.spatial.transform import Rotation
 
 
 ROOT = Path(__file__).parents[1]
@@ -59,6 +60,7 @@ def pipeline():
             pass
 
     ns = dict(np=np, time=time, KDTree=KDTree, DEFAULT_NBV_PARAMETERS=defaults.DEFAULT_NBV_PARAMETERS,
+              MIN_NBV_CLOUD_POINTS=defaults.MIN_NBV_CLOUD_POINTS,
               LOGGER=SimpleNamespace(info=lambda *args: None),
               o3d=SimpleNamespace(
                   geometry=SimpleNamespace(PointCloud=Cloud,
@@ -256,9 +258,7 @@ def node_method(name, **extra_globals):
                      Float32MultiArray=lambda: SimpleNamespace(data=[]),
                      path_is_collision_free=routes.path_is_collision_free)
     namespace.update(extra_globals)
-    helpers = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-               and node.name in ('body_rotation', 'vehicle_viewpoint')]
-    exec(compile(ast.Module(body=[*helpers, method], type_ignores=[]), str(source), 'exec'), namespace)
+    exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
     # Method fixtures supply the same injected ports as the production composition root.
     output_source = ROOT / 'python_planner/adapters/ros_output.py'
     output_nodes = [n for n in ast.parse(output_source.read_text()).body
@@ -270,6 +270,12 @@ def node_method(name, **extra_globals):
             node.diagnostics = node.get_logger()
         if hasattr(node, 'waypoint_pub'):
             node.output = namespace['RosTrajectoryOutput'](node.waypoint_pub)
+        if not hasattr(node, 'transforms'):
+            node.transforms = SimpleNamespace(
+                project_depth=lambda points, stamp: (points, np.zeros(3)),
+                vehicle_viewpoint=lambda position, target: position)
+        if name == '_depth_points' and not hasattr(node, 'depth_stamp'):
+            node.depth_stamp = SimpleNamespace(sec=1, nanosec=0)
         return namespace[name](node, *args, **kwargs)
     return invoke
 
@@ -288,7 +294,7 @@ def test_depth_range_diagnostics_count_disjoint_rejections():
     events = []
     node = SimpleNamespace(depth_scale=1., depth_stride=1, min_depth=.5, max_depth=4.,
                            latched_roll=0., latched_pitch=0., latched_yaw=0.,
-                           latched_position=np.zeros(3), camera_offset=np.zeros(3),
+                           latched_position=np.zeros(3),
                            _log_nbv_filter=lambda *e: events.append(e))
     points = node_method('_depth_points')(node, np.array([[np.nan, .5, 4., 1.]]))
     assert len(points) == 1
@@ -319,32 +325,92 @@ def test_blocked_route_cancellation_reaches_downstream_queue():
 
 
 
-def test_depth_sensor_mount_offset_rotates_with_vehicle():
+def test_depth_projection_uses_injected_timestamped_transform():
+    calls = []
+    stamp = SimpleNamespace(sec=123, nanosec=456)
+    def project(points, received_stamp):
+        calls.append((points.copy(), received_stamp))
+        return points + [10., 21., -5.5], np.array([10., 21., -5.5])
     node = SimpleNamespace(depth_scale=1., depth_stride=1, min_depth=.5, max_depth=4.,
-                           latched_roll=0., latched_pitch=0., latched_yaw=math.pi / 2,
-                           latched_position=np.array([10., 20., -5.]),
-                           camera_offset=np.array([1., 0., -.5]),
+                           depth_stamp=stamp, transforms=SimpleNamespace(project_depth=project),
                            _log_nbv_filter=lambda *args: None)
     depth = np.full((2, 2), np.nan)
     depth[1, 1] = 2.
     points = node_method('_depth_points')(node, depth)
     np.testing.assert_allclose(node._depth_sensor_origin, [10., 21., -5.5])
-    np.testing.assert_allclose(points[0], [10., 21. + math.sqrt(2), -5.5 - math.sqrt(2)])
+    np.testing.assert_allclose(points[0], [10., 21., -3.5])
+    np.testing.assert_allclose(calls[0][0], [[0., 0., 2.]])
+    assert calls[0][1] is stamp
 
 
-def test_vehicle_viewpoint_places_rotated_mount_at_requested_camera_position():
+def test_vehicle_viewpoint_uses_inverse_transform_including_mount_rotation():
     camera = np.array([5., 8., -3.])
     target = np.array([4., 10., -4.])
-    offset = np.array([.35, .1, -.25])
-    source = ROOT / 'python_planner/use_cases/mission.py'
-    helpers = [node for node in ast.parse(source.read_text()).body
-               if isinstance(node, ast.FunctionDef) and node.name in ('body_rotation', 'vehicle_viewpoint')]
-    namespace = dict(np=np, math=math)
-    exec(compile(ast.Module(body=helpers, type_ignores=[]), str(source), 'exec'), namespace)
-    vehicle = namespace['vehicle_viewpoint'](camera, target, offset)
+    translation = np.array([.3, .1, -.25])
+    rotation = Rotation.from_euler('xyz', [.2, .6, -.3])
+    source = ROOT / 'python_planner/adapters/transforms.py'
+    nodes = [node for node in ast.parse(source.read_text()).body
+             if isinstance(node, (ast.FunctionDef, ast.ClassDef))]
+    inverse_q = rotation.inv().as_quat()
+    inverse_t = rotation.inv().apply(-translation)
+    transform = SimpleNamespace(transform=SimpleNamespace(
+        translation=SimpleNamespace(**dict(zip('xyz', inverse_t))),
+        rotation=SimpleNamespace(**dict(zip('xyzw', inverse_q)))))
+    calls = []
+    def lookup(*args):
+        calls.append(args)
+        return transform
+    namespace = dict(np=np, math=math, Rotation=Rotation, Time=lambda: 0)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), namespace)
+    adapter = namespace['TfCameraTransforms'](
+        SimpleNamespace(lookup_transform=lookup), 'map', 'camera_link', 'base_link')
+    vehicle = adapter.vehicle_viewpoint(camera, target)
     yaw = math.atan2(target[1] - vehicle[1], target[0] - vehicle[0])
-    np.testing.assert_allclose(vehicle + namespace['body_rotation'](0., 0., yaw) @ offset,
+    np.testing.assert_allclose(vehicle + Rotation.from_euler('z', yaw).apply(translation),
                                camera, atol=1e-7)
+    assert calls == [('camera_link', 'base_link', 0)]
+
+
+def test_unreachable_mount_candidate_does_not_abort_other_candidates():
+    rejected = dict(utility=2., position=np.zeros(3), target=np.array([1., 2., 3.]))
+    reachable = dict(utility=1., position=np.ones(3), target=np.array([4., 5., 6.]))
+    events, routed = [], []
+    def placement(position, target):
+        if np.array_equal(target, rejected['target']):
+            raise ValueError('Unreachable camera mount')
+        return position
+    def plan(position, candidates, occupied, resolution, **kwargs):
+        routed.extend(candidates)
+        assert kwargs['candidate_utilities'] == [1.]
+        return np.empty((0, 3)), np.empty((0, 3))
+    node = SimpleNamespace(
+        min_utility=.1, transforms=SimpleNamespace(vehicle_viewpoint=placement),
+        _log_nbv_filter=lambda *event: events.append(event),
+        _motion_snapshot=lambda: (np.zeros(3), 0., []),
+        velocity_history_window=1., trajectory_history_window=1.,
+        astar_max_steps=10, optimize_motion=False, resolution=1.,
+        collision_check_spacing_factor=.5, iteration=0,
+        telemetry=SimpleNamespace(record_stage=lambda *args, **kwargs: None),
+        get_logger=lambda: SimpleNamespace(warning=lambda *args: None))
+    assert not node_method('_plan_and_publish',
+                           estimate_velocity=lambda *args: np.zeros(3),
+                           plan_multi_waypoint_route=plan)(node, [rejected, reachable], set())
+    assert len(routed) == 1
+    np.testing.assert_array_equal(routed[0][1], reachable['target'])
+    assert node._plan_failure_reason == 'astar_removed_all'
+    assert any(event[0] == 'candidate_mount_placement' for event in events)
+
+
+def test_all_unreachable_mount_candidates_follow_normal_failure_policy():
+    def placement(*args):
+        raise ValueError('Unreachable camera mount')
+    candidate = dict(utility=1., position=np.zeros(3), target=np.ones(3))
+    node = SimpleNamespace(min_utility=.1,
+                           transforms=SimpleNamespace(vehicle_viewpoint=placement),
+                           _log_nbv_filter=lambda *args: None)
+    assert not node_method('_plan_and_publish')(node, [candidate], set())
+    assert node._plan_failure_reason == 'camera_mount_removed_all'
+    np.testing.assert_array_equal(node._failed_route_target, candidate['target'])
 
 
 @pytest.mark.parametrize('first_spline_safe', [True, False])
@@ -356,7 +422,7 @@ def test_rejected_combined_spline_keeps_checked_first_structural_target(first_sp
     events, published = [], []
     logger = SimpleNamespace(info=lambda *args: None, warning=lambda *args: None)
     node = SimpleNamespace(
-        min_utility=.1, camera_offset=np.zeros(3), velocity_history_window=1.,
+        min_utility=.1, velocity_history_window=1.,
         trajectory_history_window=5., astar_max_steps=50000, optimize_motion=False,
         motion_cost_parameters={}, resolution=1., route_search_time_budget_s=2.,
         route_max_candidates=4, collision_check_spacing_factor=.5, nbv_filter_logging=True,
@@ -399,21 +465,20 @@ def test_rejected_combined_spline_keeps_checked_first_structural_target(first_sp
         ('spline', False), ('first_target_spline', True)]
 
 
-def test_vehicle_route_is_checked_instead_of_camera_offset_route():
+def test_vehicle_route_is_collision_checked_without_coordinate_shifts():
     messages = []
-    node = SimpleNamespace(camera_offset=np.array([1., 0., 0.]), resolution=1.,
+    node = SimpleNamespace(resolution=1.,
                            waypoint_pub=SimpleNamespace(publish=messages.append),
                            _log_nbv_filter=lambda *args: None)
     body = np.array([[.5, .5, .5, 0.], [.5, 2.5, .5, 0.]])
     occupied = {(0, 1, 0)}
-    assert routes.path_is_collision_free(body[:, :3] + node.camera_offset, occupied, 1.)
     assert node_method('_publish_trajectory')(node, body, occupied) is False
     assert messages == []
 
 
 def test_wire_validation_rejects_float32_rounding_into_occupied_voxel():
     messages = []
-    node = SimpleNamespace(camera_offset=np.array([.35, 0., 0.]), resolution=1.,
+    node = SimpleNamespace(resolution=1.,
                            waypoint_pub=SimpleNamespace(publish=messages.append),
                            _log_nbv_filter=lambda *args: None)
     body = np.array([[.99999999, .5, .5, 0.], [.99999999, 1.5, .5, 0.]])

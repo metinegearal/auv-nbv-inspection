@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import numpy as np
 import open3d as o3d
+from ..domain.nbv_parameters import MIN_NBV_CLOUD_POINTS
 
 @dataclass(frozen=True)
 class CloudSnapshot:
@@ -17,7 +18,7 @@ class Open3DPreprocessor:
             nb_neighbors=int(parameters['outlier_neighbors']),
             std_ratio=float(parameters['outlier_std_ratio'])))
 
-        if len(pcd.points) < 40:
+        if len(pcd.points) < MIN_NBV_CLOUD_POINTS:
             return None
 
         # Normal generation (oriented towards AUV)

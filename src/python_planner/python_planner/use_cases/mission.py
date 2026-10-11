@@ -5,48 +5,33 @@ from threading import Lock
 from collections import deque
 import numpy as np
 from auv_contracts.ports import (OccupancyMap, MissionTelemetry, TextSink,
-    Diagnostics, Clock, TrajectoryOutput, CompletionOutput)
+    Diagnostics, Clock, TrajectoryOutput)
 from auv_contracts.diagnostics import json_safe
 from ..route_planning import (generate_smooth_trajectory, inflate_occupied,
     path_is_collision_free, plan_multi_waypoint_route,
     resample_trajectory_by_distance, reconnect_trajectory)
 from .trajectory_optimization import continuity_cost, estimate_velocity
-
-def body_rotation(roll, pitch, yaw):
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    return np.array([
-        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-        [-sp, cp * sr, cp * cr],
-    ])
-
-
-def vehicle_viewpoint(camera_position, target, camera_offset):
-    """Place the vehicle so its mounted camera reaches the desired viewpoint."""
-    yaw = math.atan2(target[1] - camera_position[1], target[0] - camera_position[0])
-    for _ in range(12):
-        vehicle = camera_position - body_rotation(0., 0., yaw) @ camera_offset
-        next_yaw = math.atan2(target[1] - vehicle[1], target[0] - vehicle[0])
-        if abs(math.atan2(math.sin(next_yaw - yaw), math.cos(next_yaw - yaw))) < 1e-8:
-            return vehicle
-        yaw = next_yaw
-    return camera_position - body_rotation(0., 0., yaw) @ camera_offset
-
+from ..domain.nbv_parameters import MIN_NBV_CLOUD_POINTS
 
 class InspectionMission:
     def __init__(self, config, occupancy_map: OccupancyMap,
                  telemetry: MissionTelemetry, evaluation: TextSink,
                  diagnostics: Diagnostics, clock: Clock,
-                 output: TrajectoryOutput, completion: CompletionOutput,
-                 nbv_calculator, optimizer, telemetry_description):
+                 output: TrajectoryOutput,
+                 nbv_calculator, optimizer, telemetry_description, transforms,
+                 progress=lambda state: None):
         self.diagnostics = diagnostics
         self.clock = clock
         self.output = output
-        self.completion = completion
         self.nbv_calculator = nbv_calculator
         self.optimizer = optimizer
+        self.transforms = transforms
+        self.progress = progress
+        self.planning_enabled = False
+        self.trajectory_revision = 0
+        self.planning_state = 'WaitingForSensors'
+        self.map_ready = False
+        self.failure_reason = ''
         self.evaluation_file = evaluation
         self._nbv_empty_reason = config._nbv_empty_reason
         self._plan_failure_reason = config._plan_failure_reason
@@ -103,7 +88,6 @@ class InspectionMission:
         self.finished_mapping = False
         self.octree = occupancy_map
         self.active_trajectory = np.empty((0, 4), dtype=np.float64)
-        self.camera_offset = np.array([0.35, 0.1125 + 0.275, -0.5])
         self.force_replan = False
         self.visited_targets = []
         self.selected_targets = []
@@ -122,13 +106,6 @@ class InspectionMission:
             f'z_min_target={self.z_min_target} is not used by this filter')
         if self.nbv_filter_logging:
             self.diagnostics.info(f'NBV filter diagnostics: {telemetry_description}')
-
-
-    def request_nbv_callback(self, msg):
-        """Triggered instantly when C++ PathPlanner runs out of waypoints."""
-        if msg.data:
-            self.diagnostics.info('Received manual NBV request from PathPlanner. Forcing immediate replan!')
-            self.force_replan = True
 
 
     def _motion_snapshot(self):
@@ -201,6 +178,7 @@ class InspectionMission:
     def depth_callback(self, frame, stamp):
         """Find the historical odometry that exactly matches this depth frame."""
         self.depth_frame = frame
+        self.depth_stamp = stamp
         self.depth_sequence += 1
 
         _, _, history = self._motion_snapshot()
@@ -262,8 +240,7 @@ class InspectionMission:
                               'distance_min': float(finite_distances.min()) if finite_distances.size else None,
                               'distance_max': float(finite_distances.max()) if finite_distances.size else None,
                               'depth_scale': scale, 'stride': stride,
-                              'horizontal_fov_deg': 90.0, 'camera_pitch_deg': 45.0,
-                              'camera_offset': self.camera_offset})
+                              'horizontal_fov_deg': 90.0})
         if not np.any(valid):
             return np.empty((0, 3), dtype=np.float64)
 
@@ -275,15 +252,10 @@ class InspectionMission:
         camera_x = (cols - center_x) * distances / focal_length
         camera_y = (rows - center_y) * distances / focal_length
 
-        pitch = math.radians(45.0)
-        local_x = distances * math.cos(pitch) - camera_y * math.sin(pitch)
-        local_y = -camera_x
-        local_z = -distances * math.sin(pitch) - camera_y * math.cos(pitch)
-        local_points = np.column_stack((local_x, local_y, local_z))
-
-        rotation = body_rotation(self.latched_roll, self.latched_pitch, self.latched_yaw)
-        self._depth_sensor_origin = self.latched_position + rotation @ self.camera_offset
-        return local_points @ rotation.T + self._depth_sensor_origin
+        optical_points = np.column_stack((camera_x, camera_y, distances))
+        points, self._depth_sensor_origin = self.transforms.project_depth(
+            optical_points, self.depth_stamp)
+        return points
 
 
     def _accumulate_depth(self):
@@ -357,7 +329,7 @@ class InspectionMission:
         if len(trajectory) == 0:
             return False
 
-        wire, executed = self.output.encode(trajectory, self.camera_offset)
+        wire, executed = self.output.encode(trajectory)
         if not path_is_collision_free(executed[:, :3], occupied, self.resolution):
             self._log_nbv_filter('vehicle_wire_validation', len(trajectory), 0,
                                  {'reason': 'executed_vehicle_route_collision'})
@@ -365,6 +337,7 @@ class InspectionMission:
         self.output.publish(wire.flatten().tolist())
         self.active_trajectory = executed
         self.started_mapping = True
+        self.trajectory_revision += 1
         self.diagnostics.info(
             f'Published {len(self.active_trajectory)} trajectory points')
         return True
@@ -394,12 +367,23 @@ class InspectionMission:
             return False
         valid_candidates.sort(key=lambda candidate: candidate['utility'], reverse=True)
 
-        route_candidates = [
-            (vehicle_viewpoint(np.asarray(candidate['position'], dtype=np.float64),
-                               np.asarray(candidate['target'], dtype=np.float64), self.camera_offset),
-             np.asarray(candidate['target'], dtype=np.float64))
-            for candidate in valid_candidates
-        ]
+        route_candidates, reachable_candidates = [], []
+        for candidate in valid_candidates:
+            target = np.asarray(candidate['target'], dtype=np.float64)
+            try:
+                vehicle = self.transforms.vehicle_viewpoint(
+                    np.asarray(candidate['position'], dtype=np.float64), target)
+            except ValueError as error:
+                self._log_nbv_filter('candidate_mount_placement', 1, 0,
+                                     {'target': target, 'reason': str(error)})
+                continue
+            route_candidates.append((vehicle, target))
+            reachable_candidates.append(candidate)
+        if not route_candidates:
+            self._plan_failure_reason = 'camera_mount_removed_all'
+            self._failed_route_target = np.copy(valid_candidates[0]['target'])
+            return False
+        valid_candidates = reachable_candidates
         route_started = self.clock.perf_counter()
         position, yaw, history = self._motion_snapshot()
         velocity = estimate_velocity(
@@ -621,6 +605,11 @@ class InspectionMission:
                               'downstream_queue_cleared': True})
 
 
+    def _set_planning_state(self, state):
+        self.planning_state = state
+        self.progress(state)
+
+
     def timer_callback(self):
         """Update the map and periodically publish the next viewpoints."""
         if self.finished_mapping:
@@ -628,15 +617,19 @@ class InspectionMission:
 
         # 1. DIAGNOSTIC LOGS: Find out exactly what is blocking the pipeline
         if not self.odom_received:
+            self._set_planning_state('WaitingForOdometry')
             self.diagnostics.warning('Pipeline blocked: Waiting for Odometry...', throttle_duration_sec=2.0)
             return
         if not self.rgb_received:
+            self._set_planning_state('WaitingForRGB')
             self.diagnostics.warning('Pipeline blocked: Waiting for RGB camera...', throttle_duration_sec=2.0)
             return
         if self.depth_frame is None:
+            self._set_planning_state('WaitingForDepth')
             self.diagnostics.warning('Pipeline blocked: Waiting for Depth frame...', throttle_duration_sec=2.0)
             return
         if self.depth_sequence == self.processed_depth_sequence:
+            self._set_planning_state('WaitingForDepth')
             self.diagnostics.warning('Pipeline blocked: Waiting for NEW Depth frame (Sequence unchanged)...', throttle_duration_sec=2.0)
             return
 
@@ -655,6 +648,19 @@ class InspectionMission:
             'octomap_extract', (self.clock.perf_counter() - stage_started) * 1000.0,
             iteration=self.iteration, frame_id=self.depth_sequence)
         self.diagnostics.info(f'Iteration {self.iteration}: OctoMap total size = {len(occupied_points)} voxels.', throttle_duration_sec=2.0)
+
+        if not self.map_ready:
+            if len(occupied_points) < MIN_NBV_CLOUD_POINTS:
+                self._set_planning_state('WaitingForPointCloud')
+                self._log_nbv_filter('planning_wait_for_point_cloud', len(occupied_points), 0,
+                                     {'minimum_points': MIN_NBV_CLOUD_POINTS})
+                # Preserve the request and try the next frame, not the next
+                # periodic planning interval. Sensor startup is not a strike.
+                self.force_replan = self.force_replan or self.planning_enabled
+                self.iteration += 1
+                return
+            self.map_ready = True
+            self.force_replan = self.force_replan or self.planning_enabled
 
         stage_started = self.clock.perf_counter()
         if self.use_incremental_map_cache:
@@ -696,7 +702,7 @@ class InspectionMission:
                     break
 
         # 3. PLANNING PHASE
-        should_plan = (
+        should_plan = self.planning_enabled and (
             self.iteration % max(1, int(self.frame_period)) == 0
             or route_blocked
             or self.force_replan
@@ -704,6 +710,7 @@ class InspectionMission:
         )
 
         if should_plan:
+            self._set_planning_state('Computing')
             self._nbv_empty_reason = None
             self._log_nbv_filter('planning_begin', len(occupied_points), len(occupied_points),
                                  {'periodic': self.iteration % max(1, int(self.frame_period)) == 0,
@@ -722,10 +729,7 @@ class InspectionMission:
                 'octomap_save', (self.clock.perf_counter() - stage_started) * 1000.0,
                 iteration=self.iteration)
 
-            nbv_position, nbv_yaw, nbv_history = self._motion_snapshot()
-            roll, pitch = nbv_history[-1][2:4] if nbv_history else (0., 0.)
-            camera_position = nbv_position + body_rotation(roll, pitch, nbv_yaw) @ self.camera_offset
-            heading = np.array([math.cos(nbv_yaw), math.sin(nbv_yaw), 0.0])
+            camera_position, heading = self.transforms.camera_pose()
 
             nbv_started = self.clock.perf_counter()
             try:
@@ -786,6 +790,7 @@ class InspectionMission:
                                   'after_blacklist': len(safe_candidates),
                                   'active_trajectory_points': len(self.active_trajectory)})
             if not published:
+                self.failure_reason = failure_reason or 'planning_failed'
                 self.diagnostics.warning(f'[NBV_EMPTY] No trajectory published: {failure_reason}')
 
 
@@ -808,6 +813,8 @@ class InspectionMission:
                         self.diagnostics.warning(
                             f'All safe candidates failed ({self._plan_failure_reason}). Strike {self.failed_plan_count}/3'
                         )
+                    else:
+                        self._set_planning_state('Blacklisting')
                 else:
                     # CRITICAL FIX: Increment if NO safe candidates exist (all banned or none found).
                     self.failed_plan_count += 1
@@ -821,24 +828,10 @@ class InspectionMission:
                                       'last_empty_reason': failure_reason,
                                       'blacklisted_target_count': len(self.blacklisted_targets)})
                 self.finished_mapping = True
-                self.completion.publish(True)
 
                 self.diagnostics.info('Flushing final RAM state to OctoMap file...')
                 self.octree.write(self.map_path)
                 self.diagnostics.info('✅ Mapping finished. Explored all accessible frontiers.')
-
-            # CRITICAL FIX: Only end the mission if there are literally zero frontiers left.
-            # if len(candidates) == 0 and self.started_mapping:
-            #     self.finished_mapping = True
-            #     self.completion.publish(True)
-
-            #     # FORCE FINAL SAVE TO DISK BEFORE EXITING
-            #     self.diagnostics.info('Flushing final RAM state to OctoMap file...')
-            #     self.octree.write(self.map_path)
-
-            #     self.diagnostics.info('✅ Mapping finished. Explored all accessible frontiers.')
-            # elif not published and len(candidates) > 0:
-            #     self.diagnostics.warning('Failed to generate a collision-free spline to the targets. Retrying next cycle...')
 
             elapsed_ms = (self.clock.perf_counter() - started) * 1000.0
             self.diagnostics.info(f'Planning cycle completed in {elapsed_ms:.2f} ms.')
