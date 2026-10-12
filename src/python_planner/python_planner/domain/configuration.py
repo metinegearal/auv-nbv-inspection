@@ -13,6 +13,11 @@ def load_configuration(read_parameter):
     values['frame_period'] = read_parameter('planning_period', 10)
     values['min_utility'] = read_parameter(
         'min_utility_threshold', 0.005)
+    values['route_max_candidates'] = read_parameter('route_max_candidates', 5)
+    candidate_limit = values['route_max_candidates']
+    if (isinstance(candidate_limit, bool) or not isinstance(candidate_limit, int)
+            or candidate_limit < 1):
+        raise ValueError('route_max_candidates must be a positive integer')
     values['collision_radius'] = read_parameter(
         'collision_radius', 0.6)
     values['collision_tracking_margin'] = read_parameter(

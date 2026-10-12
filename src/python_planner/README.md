@@ -69,3 +69,94 @@ Run the standalone regressions from the ROS workspace root:
 ```bash
 PYTHONPATH=src/python_planner python3 -m pytest -q src/python_planner/test/test_motion_continuity.py
 ```
+
+# Frontier detection
+
+Frontiers are boundaries in the occupied 3D surface cloud, rather than individual
+depth-image pixels. Detection uses angular gaps between neighbors projected into
+each point's tangent plane. The search is limited by `nbv_frontier_radius`
+(default 0.5 m), with `nbv_frontier_neighbors` (40) as a cap and
+`nbv_frontier_min_neighbors` (3) as the minimum usable support. This prevents
+distant points across small holes from closing the apparent angular gap.
+Normals are normalized and neighbors with zero tangent displacement are ignored.
+
+Preprocessing retains statistically rejected boundary points if three other
+points support them within `nbv_normal_radius`. Isolated outliers remain subject
+to the statistical filter. The minimum cloud size follows the frontier-support
+and cluster-size requirements instead of a fixed 40-point cutoff.
+
+Clustering starts with dense compatible neighborhoods. Rejected small groups
+leave their points available to other seeds. Short leftover boundary sections
+can join an existing cluster when the combined patch still fits its FOV radius.
+This avoids discarding real boundaries because of input order or a small tail
+left by an earlier cluster.
+
+Planning logs now report counts from preprocessing through detected frontiers,
+clustered points, pose-history rejection, and minimum-gain rejection. A detected
+frontier may still produce no waypoint because of these later filters, utility
+thresholds, or route feasibility. The pose-history filter is a distance/yaw
+heuristic; it does not establish visibility or account for occlusion.
+
+Detection resolution still depends on voxel size, local sampling density,
+normal estimation, and the radius/angle thresholds. Features lost during depth
+filtering or voxel downsampling cannot be recovered by the angular-gap detector.
+The radius must contain enough local surface neighbors; making it too small
+leaves points unsupported, while making it too large can bridge holes again.
+
+# Planning runtime
+
+The planner limits candidate generation to nearby surfaces and reduces repeated work:
+
+- Frontier query centers are restricted to surface points within
+  `nbv_exploration_radius` of the current AUV position (default 15 m, configured in
+  `bringup/config/nbv_params.yaml`). Logs report focused and total counts. Returned
+  indices remain global, and the full cloud supplies neighbors and obstacle
+  context, so the focus cutoff does not create artificial surface boundaries.
+  Frontiers outside this window are deferred; an empty window returns no candidates.
+- PCA runs after clustering, only for the frontier points used in gain scoring.
+  Each scored point still uses its original neighbors from the full surface
+  cloud; the public PCA helper still scores every point when no subset is given.
+- Frontier detection and PCA share the surface KDTree. Detection skips rows
+  without enough local support and avoids processing padded missing neighbors.
+- Clustering checks candidate cluster centers in arrays and sorts only eligible
+  clusters when attaching leftover boundary points, preserving nearest-cluster
+  preference and stable ties.
+- Viewpoint gain and obstacle-distance/cost calculations run in batches using
+  the same formulas, thresholds, viewpoints, and normal/PCA data.
+- A* uses native integer voxel coordinates, skips superseded queue entries, and
+  favors smaller remaining distance when total estimated costs tie. It retains
+  the six-connected grid, admissible Manhattan heuristic, expansion limit, and
+  downstream collision checks. Shortest grid-path cost is preserved; equally
+  short paths may have different geometry on other maps.
+
+Local saved-map replay on 2026-10-11, before adding the 15 m focus restriction,
+median of three sequential runs per version:
+
+| Stage | Before (ms) | After (ms) |
+| --- | ---: | ---: |
+| `nbv_pca` | 164.3 | 6.1 |
+| `nbv_frontier_detection` | 187.5 | 176.1 |
+| `nbv_clustering` | 146.8 | 24.7 |
+| `nbv_candidate_evaluation` | 292.1 | 188.9 |
+| `nbv_generation` (includes the stages above and preprocessing) | 959.9 | 501.6 |
+| `route_search` | 1398.6 | 275.5 |
+
+The replay used 19,674 occupied map points, the shipped tuning, an empty
+observation history, and identical captured inputs for both versions. It retained
+the same detected frontier indices, cluster memberships, 61 candidate viewpoints,
+31 candidates above the utility threshold, and an identical 1,784-point route
+visiting 27 targets (357.892855 m). Candidate numeric differences were below
+4e-15. These timings exclude simulator/perception contention and are not a replay
+of the exact live iteration 704. Combined NBV-generation and route-search medians
+fell from about 2.36 s to 0.78 s; frontier detection remains a significant stage.
+
+An additional local detector replay with the 15 m window queried 6,571 of 12,355
+surface points. Median detection time over five runs fell from 182.1 ms (full
+cloud queries) to 86.7 ms (focused queries), about 2.1 times faster. The 641 focused
+frontiers exactly matched the full detector's frontiers inside the window. This
+isolates detector performance; it does not measure live total mission latency.
+
+The equivalence regressions compare batched scores against the scalar formulas,
+subset PCA against full-cloud PCA, and A* path lengths against exhaustive BFS
+on obstacle maps. A separate open-volume test checks that equal-cost ties no
+longer force A* to expand the whole volume before reaching the goal.

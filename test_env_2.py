@@ -239,7 +239,8 @@ def main():
     complexities = calculate_pca_complexity(pcd, k=parameters['pca_neighbors'])
     frontier_indices = detect_frontiers(
         pcd, k=parameters['frontier_neighbors'],
-        angle_threshold_deg=parameters['frontier_angle_threshold_deg'])
+        angle_threshold_deg=60,
+        min_neighbors=2)
     clusters = cluster_frontiers(
         points, normals, frontier_indices, fov_radius=parameters['cluster_fov_radius'],
         max_angle_deg=parameters['cluster_max_angle_deg'],

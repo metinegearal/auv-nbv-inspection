@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from ..plot_adapter import generate_results_plot
 from auv_contracts.mission_results import MISSION_STATS_FILENAME, distance_record
+from .response_reports import write_motion_response
 
 class FileReportWriter:
     def __init__(self, results_dir, diagnostics):
@@ -14,6 +15,8 @@ class FileReportWriter:
 
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_path = self.results_path
+        results_path.mkdir(parents=True, exist_ok=True)
+        write_motion_response(results_path, snapshot, self.diagnostics)
         csv_filename = results_path / f"trajectory_benchmark_{timestamp_str}.csv"
         # txt_filename = f"mission_stats_{timestamp_str}.txt"
         txt_filename = results_path / MISSION_STATS_FILENAME

@@ -3,6 +3,8 @@ planner_node:
   ros__parameters:
     # World-space target filtering and point-cloud preprocessing
     nbv_z_min_target: -300.0
+    # Candidate surface query centers within this distance of the AUV (meters).
+    nbv_exploration_radius: 10.0
     nbv_voxel_downsample_size: 0.25
     nbv_outlier_neighbors: 15
     nbv_outlier_std_ratio: 1.5
@@ -12,7 +14,10 @@ planner_node:
     nbv_normal_radius: 0.4
     nbv_normal_max_neighbors: 30
     nbv_frontier_neighbors: 40
-    nbv_frontier_angle_threshold_deg: 130.0
+    # Bound support locally so neighbors across small holes cannot hide edges.
+    nbv_frontier_radius: 0.5
+    nbv_frontier_min_neighbors: 3
+    nbv_frontier_angle_threshold_deg: 80.0
 
     # Frontier clustering
     nbv_cluster_fov_radius: 1.0
@@ -20,7 +25,7 @@ planner_node:
     nbv_cluster_min_samples: 5
 
     # Viewpoint sampling and observation history
-    nbv_standoff: 1.5
+    nbv_standoff: 2.0
     nbv_polar_angles_deg: [15.0, 30.0]
     nbv_azimuth_steps: 8
     # Central axis: fixed +45 degree elevation; scan yaw for occupied-map clearance.

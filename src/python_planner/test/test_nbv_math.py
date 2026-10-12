@@ -65,7 +65,7 @@ def test_frontiers_match_original_angular_gap_formula(count):
         if angles and np.max(np.diff(angles + [angles[0] + 2 * np.pi])) > np.radians(130):
             expected.append(i)
     assert math_functions['detect_frontiers'](SimpleNamespace(
-        points=points, normals=normals)) == expected
+        points=points, normals=normals), radius=None) == expected
 
 
 @pytest.mark.parametrize('count', [0, 1, 2, 39])

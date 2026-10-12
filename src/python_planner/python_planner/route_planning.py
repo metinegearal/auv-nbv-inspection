@@ -6,12 +6,16 @@ from scipy.interpolate import splprep, splev
 
 def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
     """Find a 6-connected voxel path between two metric positions."""
-    start = tuple(np.floor(start_pos / resolution).astype(int))
-    goal = tuple(np.floor(goal_pos / resolution).astype(int))
+    start = tuple(map(int, np.floor(start_pos / resolution)))
+    goal = tuple(map(int, np.floor(goal_pos / resolution)))
     if start in occupied or goal in occupied:
         return []
 
-    open_set = [(0, start)]
+    goal_x, goal_y, goal_z = goal
+    initial_h = sum(abs(start[i] - goal[i]) for i in range(3))
+    # Prefer lower remaining distance on equal f, rather than expanding the
+    # entire equal-cost volume. Manhattan remains admissible and consistent.
+    open_set = [(initial_h, initial_h, start, 0)]
     came_from = {}
     costs = {start: 0}
     directions = (
@@ -19,13 +23,12 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
         (0, 0, 1), (0, 0, -1),
     )
 
-    def heuristic(index):
-        return sum(abs(index[i] - goal[i]) for i in range(3))
-
-    for _ in range(max_steps):
-        if not open_set:
-            return []
-        _, current = heapq.heappop(open_set)
+    expansions = 0
+    while open_set and expansions < max_steps:
+        _, _, current, current_cost = heapq.heappop(open_set)
+        if current_cost != costs[current]:
+            continue  # An improved route already superseded this queue entry.
+        expansions += 1
         if current == goal:
             path = []
             while current in came_from:
@@ -38,16 +41,19 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
                 for index in path
             ]
 
-        for direction in directions:
-            neighbor = tuple(current[i] + direction[i] for i in range(3))
+        x, y, z = current
+        cost = current_cost + 1
+        for dx, dy, dz in directions:
+            neighbor = (x + dx, y + dy, z + dz)
             if neighbor in occupied:
                 continue
-            cost = costs[current] + 1
-            if cost >= costs.get(neighbor, float('inf')):
+            previous_cost = costs.get(neighbor)
+            if previous_cost is not None and cost >= previous_cost:
                 continue
             came_from[neighbor] = current
             costs[neighbor] = cost
-            heapq.heappush(open_set, (cost + heuristic(neighbor), neighbor))
+            h = abs(neighbor[0] - goal_x) + abs(neighbor[1] - goal_y) + abs(neighbor[2] - goal_z)
+            heapq.heappush(open_set, (cost + h, h, neighbor, cost))
     return []
 
 

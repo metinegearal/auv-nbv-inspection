@@ -13,14 +13,24 @@ class BenchmarkLogger(Node):
         super().__init__('benchmark_logger')
         results_dir = self.declare_parameter('results_dir', 'results').value
         show = self.declare_parameter('show_reference_objects', True).value
+        response_options = {
+            'band_fraction': self.declare_parameter('response_band_fraction', 0.02).value,
+            'dwell_s': self.declare_parameter('response_settling_dwell_s', 1.0).value,
+            'target_tolerance_m': self.declare_parameter('response_target_tolerance_m', 1e-5).value,
+            'max_samples': self.declare_parameter('response_max_samples', 3000).value,
+            'log_period_s': self.declare_parameter('response_log_period_s', 1.0).value,
+        }
         self.evaluation = TrajectoryEvaluation(
             MidrunLogger(results_dir, trajectory_only=True),
-            FileReportWriter(results_dir, self.get_logger()), time, self.get_logger(), show)
+            FileReportWriter(results_dir, self.get_logger()), time, self.get_logger(), show,
+            response_options)
         self.odom_sub = self.create_subscription(Odometry, 'holocean/odom', self.odom_callback, 10)
         self.planned_trajectory_sub = self.create_subscription(
             Float32MultiArray, 'object/areaWaypoints', self.planned_trajectory_callback, 10)
         self.finish_sub = self.create_subscription(
             Bool, '/movement/finished_execution', self.finish_callback, 10)
+        self.waypoint_sub = self.create_subscription(
+            Float32MultiArray, '/trajectory/waypoint', self.waypoint_callback, 10)
         self.timer = self.create_timer(0.5, self.evaluation.log_trajectory_callback)
     def odom_callback(self, msg):
         p, q, t = msg.pose.pose.position, msg.pose.pose.orientation, msg.header.stamp
@@ -30,6 +40,8 @@ class BenchmarkLogger(Node):
         self.evaluation.planned_trajectory_callback(ArrayEvent(tuple(msg.data)))
     def finish_callback(self, msg):
         self.evaluation.finish_callback(Flag(msg.data))
+    def waypoint_callback(self, msg):
+        self.evaluation.motion_response.waypoint_callback(ArrayEvent(tuple(msg.data)))
     def destroy_node(self):
         self.evaluation.close()
         return super().destroy_node()

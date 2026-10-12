@@ -1,6 +1,6 @@
 waypoint_control_node:
   ros__parameters:
-    kp_yaw: 0.5
+    kp_yaw: 0.4
     kp_dist: 0.75
     dvl_active: true
     stopping_distance: 0.4
@@ -8,11 +8,11 @@ waypoint_control_node:
     initial_waypoint_y: 828.0
     initial_waypoint_z: -298.0
     initial_waypoint_yaw: 0.0
-    max_yaw_command: 10.0
+    max_yaw_command: 5.0
     yaw_smoothing_rate: 0.8
     min_forward_thrust: 1.0
     max_forward_thrust: 8.0
-    command_multiplier: 5.0
+    command_multiplier: 3.0
 
 point_iterator:
   ros__parameters:
@@ -37,9 +37,11 @@ planner_node:
     planning_period: 100
     replan_on_target_arrival: true
     min_utility_threshold: 0.1
+    # Maximum highest-utility candidates passed to route planning (positive integer).
+    route_max_candidates: 5
     collision_radius: 0.3
     # Extra clearance for the controller's 0.4 m waypoint completion tolerance.
-    collision_tracking_margin: 0.4
+    collision_tracking_margin: 0.2
     trajectory_points: 300
     waypoint_spacing: 0.5
     trajectory_optimization_enabled: false
@@ -65,7 +67,7 @@ planner_node:
     route_blacklist_cooldown_s: 30.0
     spline_smoothing: 2.0
     collision_check_spacing_factor: 0.5
-    arrival_target_radius: 2.5
+    arrival_target_radius: 1.5
 
 run_baselines:
   ros__parameters:

@@ -1,8 +1,11 @@
 """Existing NBV defaults, owned by the framework-free configuration boundary."""
 DEFAULT_NBV_PARAMETERS = {
     'z_min_target': -3000.0,
+    'exploration_radius': 15.0,
     'pca_neighbors': 20,
     'frontier_neighbors': 40,
+    'frontier_radius': 0.5,
+    'frontier_min_neighbors': 3,
     'frontier_angle_threshold_deg': 130.0,
     'cluster_fov_radius': 1.0,
     'cluster_max_angle_deg': 45.0,

@@ -63,6 +63,7 @@ class InspectionMission:
         self.max_depth = config.max_depth
         self.min_depth = config.min_depth
         self.min_utility = config.min_utility
+        self.route_max_candidates = config.route_max_candidates
         self.motion_cost_parameters = config.motion_cost_parameters
         self.nbv_filter_logging = config.nbv_filter_logging
         self.nbv_parameters = config.nbv_parameters
@@ -393,6 +394,8 @@ class InspectionMission:
                                          else 'no_candidates_to_plan')
             return False
         valid_candidates.sort(key=lambda candidate: candidate['utility'], reverse=True)
+
+        valid_candidates = valid_candidates[:self.route_max_candidates]
 
         route_candidates = [
             (vehicle_viewpoint(np.asarray(candidate['position'], dtype=np.float64),

@@ -52,6 +52,11 @@ def pipeline():
         def remove_statistical_outlier(self, **kwargs):
             return self, list(range(len(self.points)))
 
+        def select_by_index(self, indices):
+            cloud = Cloud()
+            cloud.points = self.points[indices]
+            return cloud
+
         def estimate_normals(self, **kwargs):
             self.normals = np.tile([0., 0., 1.], (len(self.points), 1))
 
@@ -82,8 +87,87 @@ def pipeline():
     ns['cluster_frontiers'] = lambda *args, **kwargs: [cluster]
     ns['generate_cone_viewpoints'] = lambda *args, **kwargs: [dict(position=np.array([0., 0., 1.]))]
     ns['evaluate_viewpoint'] = lambda *args, **kwargs: 1.0
+    # Keep rejection/weight fixtures injectable at the scalar mathematical seam.
+    # Production batching is compared against the scalar formulas separately.
+    ns['evaluate_viewpoints'] = lambda positions, *args, **kwargs: np.array([
+        ns['evaluate_viewpoint'](position, *args, **kwargs) for position in positions])
+    ns['calculate_kinematic_costs'] = lambda auv, heading, positions, *args, **kwargs: np.array([
+        ns['calculate_kinematic_cost'](auv, heading, position, *args, **kwargs)
+        for position in positions])
     ns['calculate_kinematic_cost'] = lambda *args, **kwargs: 1.0
     return ns, points
+
+
+@pytest.mark.parametrize('radius,expected', [(2., np.arange(18, 23)),
+                                           (15., np.arange(5, 36))])
+def test_focus_window_uses_auv_position_and_keeps_full_cloud_for_neighbors(pipeline, radius, expected):
+    ns, _ = pipeline
+    points = np.column_stack((np.arange(60.), np.zeros(60), np.zeros(60)))
+    recorded = {}
+
+    def detect(cloud, **kwargs):
+        recorded.update(kwargs)
+        recorded['points'] = np.asarray(cloud.points)
+        return []
+
+    ns['detect_frontiers'] = detect
+    ns['cluster_frontiers'] = lambda *args, **kwargs: []
+    assert ns['calculate_nbv_waypoints'](
+        points, np.array([20., 0., 0.]), np.array([1., 0., 0.]), [],
+        parameters={'exploration_radius': radius}) == []
+    np.testing.assert_array_equal(recorded['focus_indices'], expected)
+    np.testing.assert_array_equal(recorded['points'], points)
+    np.testing.assert_array_equal(recorded['tree'].data, points)
+
+
+@pytest.mark.parametrize('radius', [0., -1., np.inf, np.nan])
+def test_focus_window_rejects_invalid_radius(pipeline, radius):
+    ns, points = pipeline
+    with pytest.raises(ValueError, match='exploration radius'):
+        ns['calculate_nbv_waypoints'](
+            points, np.zeros(3), np.array([1., 0., 0.]), [],
+            parameters={'exploration_radius': radius})
+
+
+def test_empty_focus_returns_before_heavy_math_and_logs_coverage(pipeline):
+    ns, points = pipeline
+    messages = []
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Empty focus should skip frontier detection and PCA')
+
+    ns['detect_frontiers'] = ns['calculate_pca_complexity'] = unexpected
+    result = ns['calculate_nbv_waypoints'](
+        points, np.array([30., 0., 0.]), np.array([1., 0., 0.]), [],
+        diagnostics=SimpleNamespace(info=messages.append))
+    assert result == []
+    assert 'Focus Window: Processing 0/60 points within 15.0m' in messages
+
+
+def test_pca_only_scores_clustered_focus_points_with_global_indices(pipeline):
+    ns, _ = pipeline
+    points = np.column_stack((np.arange(60.), np.zeros(60), np.zeros(60)))
+    selected = np.arange(5, 11)
+    recorded = {}
+
+    def cluster(surface, normals, frontier_indices, **kwargs):
+        assert set(selected) <= set(frontier_indices)
+        return [dict(id=0, centroid=surface[selected].mean(axis=0),
+                     avg_normal=np.array([0., 0., 1.]), points=surface[selected],
+                     normals=normals[selected], global_indices=selected)]
+
+    def complexity(cloud, **kwargs):
+        recorded.update(kwargs)
+        return np.ones(len(cloud.points))
+
+    ns['detect_frontiers'] = lambda cloud, **kwargs: kwargs['focus_indices'].tolist()
+    ns['cluster_frontiers'] = cluster
+    ns['calculate_pca_complexity'] = complexity
+    result = ns['calculate_nbv_waypoints'](
+        points, np.array([20., 0., 0.]), np.array([1., 0., 0.]), [])
+    assert result
+    np.testing.assert_array_equal(recorded['indices'], selected)
+    np.testing.assert_array_equal(recorded['tree'].data, points)
 
 
 @pytest.mark.parametrize('case,reason', [
@@ -104,7 +188,7 @@ def test_empty_pipeline_returns_no_candidates(pipeline, case, reason):
     elif case == 'z':
         parameters['z_min_target'] = 0.0  # Equality must be rejected too.
     elif case == 'small':
-        points = points[:39]
+        points = points[:4]
     elif case == 'frontiers':
         ns['detect_frontiers'] = lambda *args, **kwargs: []
         ns['cluster_frontiers'] = lambda *args, **kwargs: []
