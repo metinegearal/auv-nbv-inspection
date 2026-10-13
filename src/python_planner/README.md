@@ -18,7 +18,48 @@ Both default to 1.0. Reduce `nbv_utility_cost_weight` to 0.5 for less cost influ
 relative raw cost components; scaling all three equally cancels during min/max
 normalization. `nbv_complexity_weight` changes the rough-surface gain preference.
 
+# Seabed gain penalty
+
+NBV gain also applies a per-surface-point seabed multiplier:
+`1 - nbv_seabed_penalty_strength * exp(-max(0, z - floor_z) / nbv_seabed_decay_height)`.
+The configured strength is 0.95 and decay height is 0.5 m, retaining 5% of gain
+at/below the floor, 65% at 0.5 m above, and 87% at 1 m above. This affects raw
+information gain before its minimum threshold and utility normalization; it
+does not impose a vehicle depth limit or change collision handling.
+
+Floor height is inferred automatically from the lowest well-supported broad
+horizontal layer of the occupied map, without an absolute Z cutoff or fallback.
+Height-density peaks, horizontal spread, and area coverage reject isolated low
+noise, narrow pipes, and vertical-wall slices. Cached height-band sums/counts
+and XY support are updated only for changed map voxels, including removals;
+unchanged snapshots do not recompute the estimate or count observations twice.
+The mean and unique floor-voxel count are retained for the run. If the map has
+insufficient floor evidence, the gain penalty is disabled until a floor is
+detected. This global estimate assumes a roughly level seabed and is a geometric
+heuristic; a broad low horizontal structure can also resemble the floor.
+Set `nbv_seabed_enabled: false` or strength to 0 to disable the gain effect.
+The standalone visualization estimates the floor once from the loaded map.
+
 # Motion continuity during NBV replanning
+
+Bringup reserves `collision_radius + collision_tracking_margin` around occupied
+voxels. The shipped tracking margin is 0.6 m: 0.4 m for waypoint handoff plus
+0.2 m for tracking uncertainty. Keep this margin at least as large as the
+controller's completion tolerance when tuning a custom configuration.
+
+Obstacle inflation uses SciPy's compiled Euclidean distance transform on a
+bounded local voxel grid, preserving the exact integer sphere and
+`ceil(radius/resolution)` rule. Maps requiring more than four million grid
+cells use sparse expansion instead. The clearance radius is unchanged; this
+optimization reduces computation rather than removing collision voxels.
+
+Active-route checks reconnect from the current vehicle position and validate
+the remaining path; a safe old centerline is insufficient if the vehicle's new
+entry crosses a wall. If an unfinished vehicle moves less than
+`route_stall_min_progress_m` (0.15 m) over `route_stall_timeout_s` (10 s), the
+planner clears the downstream queue and replans. This does not mark unobserved
+space as an obstacle or relax collision checks. An occupied start still needs
+a safe physical recovery; the planner will not route through the wall to escape.
 
 The planner keeps two stages: collision-safe A* waypoint routing, followed by
 bounded numerical trajectory optimization. Both use the measured direction of

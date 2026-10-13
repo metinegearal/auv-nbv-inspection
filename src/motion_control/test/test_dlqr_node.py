@@ -49,6 +49,31 @@ def command(node):
     return np.array(node.command_pub.publish.call_args.args[0].data)
 
 
+def test_initial_target_drives_before_first_nbv_waypoint(node):
+    controller = WaypointControlNode(parameter_overrides=[
+        Parameter('initial_waypoint_x', value=354.),
+        Parameter('initial_waypoint_y', value=828.),
+        Parameter('initial_waypoint_z', value=-298.),
+    ])
+    try:
+        controller.timer.cancel()
+        controller.now_seconds = Mock(return_value=10.)
+        for name in ('command_pub', 'report_pub', 'force_pub', 'applied_pub'):
+            setattr(controller, name, Mock())
+        np.testing.assert_array_equal(controller.target, [0., 0., 0., 354., 828., -298.])
+        feed_state(controller, position=(350., 828., -298.))
+        controller.tick()
+        assert controller.force_pub.publish.call_args.args[0].vector.x > 0.
+        assert np.any(command(controller) != 0.)
+        feed_state(controller, position=(354., 828., -298.))
+        controller.tick()
+        assert list(controller.report_pub.publish.call_args.args[0].data) == [354., 828., -298.]
+        controller.waypoint_callback(Float32MultiArray(data=[355., 829., -297., .2]))
+        np.testing.assert_array_equal(controller.target, [0., 0., 0., 355., 829., -297.])
+    finally:
+        controller.destroy_node()
+
+
 def test_wait_hover_stale_and_resume(node):
     node.tick()
     np.testing.assert_array_equal(command(node), np.zeros(8))
@@ -64,6 +89,49 @@ def test_wait_hover_stale_and_resume(node):
     feed_state(node)
     node.tick()
     assert node.response_epoch == 11.
+
+
+def test_cruise_uses_following_queue_point_and_keeps_active_target(node):
+    assert node.set_parameters_atomically([
+        Parameter('waypoint_cruise_speed', value=1.)]).successful
+    node.waypoint_callback(Float32MultiArray(data=[.5, 0., 0., 0., 1., 0., 0., 0.]))
+    np.testing.assert_array_equal(node.target[3:], [.5, 0., 0.])
+    np.testing.assert_array_equal(node.next_waypoint, [1., 0., 0.])
+    feed_state(node)
+    node.tick()
+    expected = node.system.control_force(node.state, [1., 0., 0.])
+    requested = node.force_pub.publish.call_args.args[0].vector
+    np.testing.assert_allclose([requested.x, requested.y, requested.z], expected)
+    feed_state(node, position=(.3, 0., 0.))
+    node.tick()
+    assert list(node.report_pub.publish.call_args.args[0].data) == [.5, 0., 0.]
+    node.waypoint_callback(Float32MultiArray(data=[]))
+    assert not node.waypoint_active and node.next_waypoint is None
+    np.testing.assert_allclose(node.target, [0., 0., 0., .3, 0., 0.])
+
+
+def test_cruise_brakes_at_end_and_explicit_state_overrides_disable_cruise(node):
+    assert node.set_parameters_atomically([
+        Parameter('waypoint_cruise_speed', value=1.)]).successful
+    node.waypoint_callback(Float32MultiArray(data=[.1, 0., 0., 0.]))
+    feed_state(node, velocity=(.4, 0., 0.))
+    node.tick()
+    expected = node.system.control_force(node.state, node.target)
+    requested = node.force_pub.publish.call_args.args[0].vector
+    np.testing.assert_allclose([requested.x, requested.y, requested.z], expected)
+    assert requested.x < 0.
+    assert node.set_parameters_atomically([
+        Parameter('target_state', value=[1., 0., 0., 0., 0., 0.])]).successful
+    assert not node.waypoint_active
+
+
+def test_cruise_parameters_and_malformed_queue_are_rejected(node):
+    original = node.target.copy()
+    for name, value in [('waypoint_cruise_speed', -1.),
+                        ('waypoint_braking_acceleration', 0.)]:
+        assert not node.set_parameters_atomically([Parameter(name, value=value)]).successful
+    node.waypoint_callback(Float32MultiArray(data=[1., 2., 3., 0., 4.]))
+    np.testing.assert_array_equal(node.target, original)
 
 
 def test_waypoint_world_body_rotation_saturation_and_report(node):

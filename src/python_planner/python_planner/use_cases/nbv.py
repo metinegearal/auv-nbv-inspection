@@ -5,6 +5,7 @@ from scipy.spatial import KDTree
 
 
 from ..domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
+from ..domain.seabed import SeabedEstimate
 
 # ==========================================
 # NBV MATHEMATICAL HELPER FUNCTIONS
@@ -270,24 +271,45 @@ def generate_cone_viewpoints(
 
     return candidates
 
+def seabed_gain_weights(z_values, seabed_z, decay_height=0.5, strength=0.95):
+    """Penalize near-floor surface gain; the penalty decays upward exponentially."""
+    z_values = np.asarray(z_values, dtype=float)
+    if seabed_z is None:
+        return np.ones_like(z_values)
+    if (not np.isfinite([seabed_z, decay_height, strength]).all()
+            or decay_height <= 0.0 or not 0.0 <= strength <= 1.0):
+        raise ValueError('seabed floor/decay must be finite, decay positive, strength in [0, 1]')
+    height = np.maximum(0.0, z_values - seabed_z)
+    return 1.0 - strength * np.exp(-height / decay_height)
+
+
 def evaluate_viewpoint(vp_pos, cluster_pts, cluster_normals, cluster_complexities,
-                       complexity_weight=15.0):
+                       complexity_weight=15.0, seabed_z=None,
+                       seabed_decay_height=0.5, seabed_penalty_strength=0.95):
     rays = np.asarray(cluster_pts) - vp_pos
     distances = np.linalg.norm(rays, axis=1)
     valid = distances >= 1e-4
     directions = rays[valid] / distances[valid, None]
     cos_theta = np.clip(np.sum(-directions * np.asarray(cluster_normals)[valid],
                                axis=1), 0.0, 1.0)
-    return float(np.sum(cos_theta * (1.0 + complexity_weight * np.asarray(cluster_complexities)[valid])))
+    weights = 1.0 + complexity_weight * np.asarray(cluster_complexities)[valid]
+    if seabed_z is not None:
+        weights *= seabed_gain_weights(np.asarray(cluster_pts)[valid, 2], seabed_z,
+                                       seabed_decay_height, seabed_penalty_strength)
+    return float(np.sum(cos_theta * weights))
 
 
 def evaluate_viewpoints(positions, cluster_pts, cluster_normals, cluster_complexities,
-                        complexity_weight=15.0):
+                        complexity_weight=15.0, seabed_z=None,
+                        seabed_decay_height=0.5, seabed_penalty_strength=0.95):
     """Score the same incidence/PCA gain for a batch of candidate viewpoints."""
     positions = np.asarray(positions, dtype=float).reshape(-1, 3)
     points = np.asarray(cluster_pts)
     normals = np.asarray(cluster_normals)
     weights = 1.0 + complexity_weight * np.asarray(cluster_complexities)
+    if seabed_z is not None:
+        weights *= seabed_gain_weights(points[:, 2], seabed_z,
+                                       seabed_decay_height, seabed_penalty_strength)
     gains = np.zeros(len(positions))
     # Bound temporary storage even for large surface clusters or wide cones.
     batch_size = max(1, 65536 // max(1, len(points)))
@@ -393,6 +415,27 @@ def calculate_nbv_waypoints(
     points_raw = np.asarray(occupied_points)
     if len(points_raw) == 0:
         return []
+    seabed_z = None
+    sample_count = 0
+    if parameters['seabed_enabled']:
+        if 'seabed_estimate_z' in parameters:
+            seabed_z = parameters['seabed_estimate_z']
+            sample_count = parameters.get('seabed_sample_count', 0)
+        else:
+            # Standalone callers infer from this map snapshot. The mission passes
+            # its cached map statistics so it does not repeat this work here.
+            estimate = SeabedEstimate(float(parameters['voxel_downsample_size']))
+            timed('nbv_seabed_estimation', lambda: estimate.update(points_raw))
+            seabed_z, sample_count = estimate.mean_z, estimate.sample_count
+    if seabed_z is not None:
+        seabed_z = float(seabed_z)
+        seabed_gain_weights([], seabed_z, parameters['seabed_decay_height'],
+                            parameters['seabed_penalty_strength'])
+        diagnostics.info(
+            f'NBV seabed floor Z={seabed_z:.3f}; '
+            f'map floor samples={sample_count}')
+    elif parameters['seabed_enabled']:
+        diagnostics.info('NBV seabed: no supported floor layer yet; penalty disabled')
 
     # 1. Pre-Processing (Filter seabed & clean noise)
     z_min_target = float(parameters['z_min_target'])
@@ -534,7 +577,10 @@ def calculate_nbv_waypoints(
         positions = np.asarray([candidate['position'] for candidate in candidates])
         gains = evaluate_viewpoints(
             positions, cluster['points'], cluster['normals'], c_complexities,
-            complexity_weight=float(parameters['complexity_weight']))
+            complexity_weight=float(parameters['complexity_weight']),
+            seabed_z=seabed_z,
+            seabed_decay_height=float(parameters['seabed_decay_height']),
+            seabed_penalty_strength=float(parameters['seabed_penalty_strength']))
         accepted = gains >= min_raw_gain
         gain_rejections += int(np.count_nonzero(~accepted))
         if not accepted.any():
@@ -575,26 +621,26 @@ def calculate_nbv_waypoints(
     norm_gains = normalize_array(gains)
     norm_costs = normalize_array(costs)
 
-    cluster_winners = {}
+    cluster_candidates = {}
     for i, cand in enumerate(all_candidates):
         cand['utility'] = (float(parameters['utility_gain_weight']) * norm_gains[i]
                            - float(parameters['utility_cost_weight']) * norm_costs[i])
-        cid = cand['cluster_id']
+        cluster_candidates.setdefault(cand['cluster_id'], []).append(cand)
 
-        if cid not in cluster_winners or cand['utility'] > cluster_winners[cid]['utility']:
-            cluster_winners[cid] = cand
-
+    
     # 5. Format and Sort Output
     final_waypoints = []
-    for cid, winner in cluster_winners.items():
-        final_waypoints.append({
-            'cluster_id': cid,
-            'position': winner['position'],
-            'target': winner['target'],
-            'utility': winner['utility'],
-            'raw_gain': winner['raw_gain'],
-            'raw_cost': winner['raw_cost']
-        })
+    for cid, cands in cluster_candidates.items():
+        cands.sort(key=lambda x: x['utility'], reverse=True)
+        for winner in cands[:3]:  # Retain top 3 per cluster
+            final_waypoints.append({
+                'cluster_id': cid,
+                'position': winner['position'],
+                'target': winner['target'],
+                'utility': winner['utility'],
+                'raw_gain': winner['raw_gain'],
+                'raw_cost': winner['raw_cost']
+            })
 
     final_waypoints.sort(key=lambda x: x['utility'], reverse=True)
     return final_waypoints

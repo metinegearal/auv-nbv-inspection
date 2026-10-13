@@ -22,6 +22,11 @@ def load_configuration(read_parameter):
         'collision_radius', 0.6)
     values['collision_tracking_margin'] = read_parameter(
         'collision_tracking_margin', 0.4)
+    values['route_stall_timeout_s'] = read_parameter('route_stall_timeout_s', 10.0)
+    values['route_stall_min_progress_m'] = read_parameter('route_stall_min_progress_m', 0.15)
+    for name in ('route_stall_timeout_s', 'route_stall_min_progress_m'):
+        if not 0.0 < float(values[name]) < float('inf'):
+            raise ValueError(f'{name} must be finite and positive')
     values['blacklist_cooldown_s'] = read_parameter(
         'route_blacklist_cooldown_s', 30.0)
     values['trajectory_points'] = read_parameter(

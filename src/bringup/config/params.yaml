@@ -1,5 +1,13 @@
 waypoint_control_node:
   ros__parameters:
+    # Active DLQR tuning: [vx, vy, vz, px, py, pz]. Stronger position tracking
+    # keeps short NBV legs moving; velocity damping and motor limits are retained.
+    state_weights: [80.0, 80.0, 80.0, 256.0, 256.0, 256.0]
+    force_weights: [0.1, 0.1, 0.1]
+    # Follow straight queue legs with velocity feedback; brake for turns/endpoints.
+    waypoint_cruise_speed: 0.8
+    waypoint_braking_acceleration: 0.8
+    velocity_weights: [400.0, 400.0, 400.0]
     kp_yaw: 0.4
     kp_dist: 0.75
     dvl_active: true
@@ -39,9 +47,12 @@ planner_node:
     min_utility_threshold: 0.1
     # Maximum highest-utility candidates passed to route planning (positive integer).
     route_max_candidates: 5
-    collision_radius: 0.3
-    # Extra clearance for the controller's 0.4 m waypoint completion tolerance.
-    collision_tracking_margin: 0.2
+    collision_radius: 0.4
+    # Reserve 0.4 m waypoint handoff tolerance plus 0.2 m tracking uncertainty.
+    collision_tracking_margin: 0.4
+    # Cancel a route when an unfinished vehicle stops making positional progress.
+    route_stall_timeout_s: 6.0
+    route_stall_min_progress_m: 0.15
     trajectory_points: 300
     waypoint_spacing: 0.5
     trajectory_optimization_enabled: false

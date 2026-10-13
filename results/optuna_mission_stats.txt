@@ -1,9 +1,9 @@
 === AUV Exploration Benchmark ===
-Total Mission Time (Makespan): 756.42 seconds
-Total Distance Traveled: 65.91 meters
-Average Flight Speed: 0.087 m/s
-Total Trajectory Waypoints Logged: 1513
-Peak Speed: 0.244 m/s
-Mean Absolute Heading Error: 62.779 deg
-Maximum Absolute Heading Error: 171.053 deg
-Planned vs Real Trajectory RMSE: 0.659 m
+Total Mission Time (Makespan): 2938.48 seconds
+Total Distance Traveled: 137.09 meters
+Average Flight Speed: 0.047 m/s
+Total Trajectory Waypoints Logged: 5877
+Peak Speed: 0.251 m/s
+Mean Absolute Heading Error: 81.459 deg
+Maximum Absolute Heading Error: 177.850 deg
+Planned vs Real Trajectory RMSE: 0.633 m

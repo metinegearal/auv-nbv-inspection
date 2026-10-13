@@ -12,6 +12,34 @@ def vector(value, size, name):
     return result.copy()
 
 
+def waypoint_velocity(position, target, next_target=None, *, speed=1.0,
+                      braking_acceleration=0.8, stopping_distance=0.4):
+    """Cruise toward the active waypoint and brake for corners or a final stop.
+
+    The next queue point sets corner speed; the active target is never skipped.
+    Speed is a reference magnitude, not a hard bound on physical velocity.
+    """
+    position, target = vector(position, 3, 'position'), vector(target, 3, 'target')
+    if not np.isfinite([speed, braking_acceleration, stopping_distance]).all():
+        raise ValueError('waypoint speed settings must be finite')
+    if speed < 0 or braking_acceleration <= 0 or stopping_distance < 0:
+        raise ValueError('waypoint speed settings must be nonnegative with positive acceleration')
+    delta = target - position
+    distance = np.linalg.norm(delta)
+    if distance < 1e-9:
+        return np.zeros(3)
+    direction = delta / distance
+    corner_speed = 0.0
+    if next_target is not None:
+        following = vector(next_target, 3, 'next_target') - target
+        length = np.linalg.norm(following)
+        if length > 1e-9:
+            corner_speed = speed * np.clip(np.dot(direction, following / length), 0., 1.)
+    braking_distance = max(0., distance - stopping_distance)
+    requested_speed = min(speed, np.sqrt(corner_speed**2 + 2 * braking_acceleration * braking_distance))
+    return direction * requested_speed
+
+
 class FeedbackSystem:
     """
     World state [vx, vy, vz, px, py, pz], force [Fx, Fy, Fz] in N.

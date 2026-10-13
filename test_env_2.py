@@ -11,6 +11,7 @@ import pyoctomap as octomap
 PROJECT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_DIR / "src" / "python_planner"))
 from python_planner.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
+from python_planner.domain.seabed import SeabedEstimate
 from python_planner.use_cases.nbv import (
     calculate_pca_complexity, detect_frontiers, cluster_frontiers,
     generate_cone_viewpoints, evaluate_viewpoint, calculate_kinematic_cost,
@@ -234,12 +235,16 @@ def main():
     print("CSV has no measured yaw: viewing headings are estimated from horizontal travel.")
 
     pcd, occupied_points, resolution = load_real_octomap(str(args.map), auv_position, return_map=True)
+    seabed = SeabedEstimate(resolution)
+    if parameters['seabed_enabled']:
+        seabed.update(occupied_points)
+        print(f"Seabed floor Z from map: {seabed.mean_z}; map samples: {seabed.sample_count}")
     points, normals = np.asarray(pcd.points), np.asarray(pcd.normals)
     print(f"Loaded {len(points)} valid pipe voxels.")
     complexities = calculate_pca_complexity(pcd, k=parameters['pca_neighbors'])
     frontier_indices = detect_frontiers(
         pcd, k=parameters['frontier_neighbors'],
-        angle_threshold_deg=60,
+        angle_threshold_deg=80,
         min_neighbors=2)
     clusters = cluster_frontiers(
         points, normals, frontier_indices, fov_radius=parameters['cluster_fov_radius'],
@@ -280,7 +285,10 @@ def main():
         for candidate in candidates:
             gain = evaluate_viewpoint(
                 candidate['position'], cluster['points'], cluster['normals'],
-                complexities[cluster['global_indices']], complexity_weight=parameters['complexity_weight'])
+                complexities[cluster['global_indices']], complexity_weight=parameters['complexity_weight'],
+                seabed_z=seabed.mean_z if parameters['seabed_enabled'] else None,
+                seabed_decay_height=parameters['seabed_decay_height'],
+                seabed_penalty_strength=parameters['seabed_penalty_strength'])
             if gain < parameters['min_raw_gain']:
                 continue
             cost = calculate_kinematic_cost(

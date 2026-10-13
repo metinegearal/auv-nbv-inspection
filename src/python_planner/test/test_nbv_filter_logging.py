@@ -14,6 +14,7 @@ import time
 import numpy as np
 import pytest
 from scipy.spatial import KDTree
+from python_planner.domain.seabed import SeabedEstimate
 
 
 ROOT = Path(__file__).parents[1]
@@ -63,7 +64,8 @@ def pipeline():
         def orient_normals_towards_camera_location(self, position):
             pass
 
-    ns = dict(np=np, time=time, KDTree=KDTree, DEFAULT_NBV_PARAMETERS=defaults.DEFAULT_NBV_PARAMETERS,
+    ns = dict(np=np, time=time, KDTree=KDTree, SeabedEstimate=SeabedEstimate,
+              DEFAULT_NBV_PARAMETERS=defaults.DEFAULT_NBV_PARAMETERS,
               LOGGER=SimpleNamespace(info=lambda *args: None),
               o3d=SimpleNamespace(
                   geometry=SimpleNamespace(PointCloud=Cloud,
@@ -236,6 +238,18 @@ def test_axis_selection_receives_raw_occupied_map_not_cleaned_target(pipeline):
     np.testing.assert_array_equal(selected[0], raw)
 
 
+def test_seabed_penalty_applies_before_raw_gain_rejection(pipeline):
+    from python_planner.use_cases.nbv import evaluate_viewpoints
+    ns, points = pipeline
+    ns['evaluate_viewpoints'] = evaluate_viewpoints
+    args = (points, np.zeros(3), np.array([1., 0., 0.]))
+    baseline = ns['calculate_nbv_waypoints'](*args, parameters={'seabed_enabled': False})
+    suppressed = ns['calculate_nbv_waypoints'](
+        *args, parameters={'seabed_enabled': True, 'seabed_estimate_z': 0.,
+                           'seabed_penalty_strength': 1.})
+    assert baseline and suppressed == []
+
+
 def test_timing_preserves_candidates(pipeline):
     ns, points = pipeline
     args = (points, np.zeros(3), np.array([1., 0., 0.]))
@@ -302,7 +316,9 @@ def test_pipeline_passes_complexity_weight_to_gain_calculation(pipeline):
 ])
 def test_astar_return_matches_occupied_endpoints_and_expansion_limit(occupied, budget, found):
     args = (np.array([.5, .5, .5]), np.array([2.5, .5, .5]), occupied, 1.0)
-    assert bool(routes.astar_3d(*args, max_steps=budget)) == found
+    path, reason = routes.astar_3d(*args, max_steps=budget)
+    assert bool(path) == found
+    assert (reason == 'success') == found
 
 
 def test_collision_rejects_occupied_voxel_between_endpoints():
@@ -312,11 +328,12 @@ def test_collision_rejects_occupied_voxel_between_endpoints():
 
 
 def test_route_skips_occupied_viewpoint():
-    result, targets = routes.plan_multi_waypoint_route(
+    result, targets, reason = routes.plan_multi_waypoint_route(
         np.array([.5, .5, .5]),
         [(np.array([2.5, .5, .5]), np.array([3., 0., 0.]))],
         {(2, 0, 0)}, 1.0)
     assert len(result) == len(targets) == 0
+    assert reason == 'goal_occupied'
 
 
 def test_jsonl_logs_iteration_and_handles_nonfinite_values(tmp_path):
@@ -432,7 +449,7 @@ def test_vehicle_viewpoint_places_rotated_mount_at_requested_camera_position():
 
 
 @pytest.mark.parametrize('first_spline_safe', [True, False])
-def test_rejected_combined_spline_keeps_checked_first_structural_target(first_spline_safe):
+def test_rejected_combined_spline_uses_checked_prefix_or_polyline(first_spline_safe):
     route = np.array([[.5, .5, .5], [1.5, .5, .5], [2.5, .5, .5], [3.5, .5, .5],
                       [3.5, 1.5, .5], [3.5, 2.5, .5], [2.5, 2.5, .5], [1.5, 2.5, .5]])
     targets = np.array([[4., 0., 0.]] * 4 + [[1., 3., 0.]] * 4)
@@ -457,7 +474,7 @@ def test_rejected_combined_spline_keeps_checked_first_structural_target(first_sp
         return routes.generate_smooth_trajectory(path, tracked, **kwargs)
     def route_with_utilities(*args, **kwargs):
         assert kwargs['candidate_utilities'] == [1.]
-        return route, targets
+        return route, targets, 'success'
 
     method = node_method('_plan_and_publish', time=time,
                          estimate_velocity=lambda *args: np.zeros(3),
@@ -468,19 +485,20 @@ def test_rejected_combined_spline_keeps_checked_first_structural_target(first_sp
     # Utility order can differ from A* travel order: do not blame this top target.
     candidate = dict(cluster_id=0, utility=1., target=targets[-1], position=route[-1])
     result = method(node, [candidate], occupied)
-    if not first_spline_safe:
-        assert not result and published == []
-        assert node._plan_failure_reason == 'all_trajectory_options_rejected'
-        np.testing.assert_equal(node._failed_route_target, targets[0])
-        return
     assert result
     assert len(published) == 1
     assert routes.path_is_collision_free(published[0][:, :3], occupied, 1.)
-    np.testing.assert_allclose(published[0][-1, :3], route[3])
-    assert all(np.array_equal(target, targets[0]) for target in node.selected_targets)
+    np.testing.assert_allclose(published[0][-1, :3], route[3] if first_spline_safe else route[-1])
+    if first_spline_safe:
+        assert all(np.array_equal(target, targets[0]) for target in node.selected_targets)
+    else:
+        assert any(np.array_equal(target, targets[-1]) for target in node.selected_targets)
+    assert node._failed_route_target is None
     options = [event for event in events if event[0] == 'trajectory_option']
-    assert [(event[3]['option'], event[3]['collision_free']) for event in options] == [
-        ('spline', False), ('first_target_spline', True)]
+    expected = [('spline', False), ('first_target_spline', first_spline_safe)]
+    if not first_spline_safe:
+        expected.append(('linear_fallback', True))
+    assert [(event[3]['option'], event[3]['collision_free']) for event in options] == expected
 
 
 def test_vehicle_route_is_checked_instead_of_camera_offset_route():

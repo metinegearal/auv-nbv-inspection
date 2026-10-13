@@ -13,7 +13,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import MagneticField
 from std_msgs.msg import Bool, Float32MultiArray
 
-from .dlqr import FeedbackSystem, vector
+from .dlqr import FeedbackSystem, vector, waypoint_velocity
 from .thrusters import force_to_thrust, MAX_THRUST, thrust_to_force
 
 
@@ -42,6 +42,7 @@ class WaypointControlNode(Node):
             'control_mode': 'state', 'target_velocity': [0., 0., 0.],
             'target_state': [0., 0., 0., *[self.value(f'initial_waypoint_{a}') for a in 'xyz']],
             'stopping_distance': 0.25, 'log_period': 1.,
+            'waypoint_cruise_speed': 0.0, 'waypoint_braking_acceleration': 0.8,
             'kp_yaw': 0.6, 'max_yaw_command': 10.,
         }.items():
             self.declare_parameter(name, value)
@@ -58,6 +59,9 @@ class WaypointControlNode(Node):
         self.target_yaw = self.value('initial_waypoint_yaw')
         self.received = {}
         self.target = vector(self.value('target_state'), 6, 'target_state')
+        initial = np.r_[np.zeros(3), [self.value(f'initial_waypoint_{a}') for a in 'xyz']]
+        self.waypoint_active = np.array_equal(self.target, initial)
+        self.next_waypoint = None
         self.target_epoch = None
         self.monitor = None
         self.response_epoch = None
@@ -111,7 +115,8 @@ class WaypointControlNode(Node):
         result = self.validate_parameters([
             self.get_parameter(name) for name in (
                 'control_mode', 'target_state', 'target_velocity', 'stopping_distance',
-                'log_period', 'kp_yaw', 'max_yaw_command')])
+                'log_period', 'kp_yaw', 'max_yaw_command',
+                'waypoint_cruise_speed', 'waypoint_braking_acceleration')])
         if not result.successful:
             raise ValueError(result.reason)
 
@@ -123,7 +128,11 @@ class WaypointControlNode(Node):
                     vector(value, 6 if name == 'target_state' else 3, name)
                 elif name == 'control_mode' and value not in ('state', 'velocity'):
                     raise ValueError('control_mode must be state or velocity')
-                elif name in ('stopping_distance', 'log_period', 'kp_yaw', 'max_yaw_command'):
+                elif name == 'waypoint_cruise_speed':
+                    if not math.isfinite(value) or value < 0:
+                        raise ValueError('waypoint_cruise_speed must be finite and nonnegative')
+                elif name in ('stopping_distance', 'log_period', 'kp_yaw', 'max_yaw_command',
+                              'waypoint_braking_acceleration'):
                     if not math.isfinite(value) or value <= 0:
                         raise ValueError(f'{name} must be finite and positive')
         except (ValueError, TypeError) as error:
@@ -133,6 +142,8 @@ class WaypointControlNode(Node):
     def parameters_changed(self, parameters):
         for parameter in parameters:
             if parameter.name == 'target_state':
+                self.waypoint_active = False
+                self.next_waypoint = None
                 self.set_target(parameter.value)
             elif parameter.name == 'control_mode':
                 self.reset_response()
@@ -150,15 +161,26 @@ class WaypointControlNode(Node):
             self.reset_response()
 
     def waypoint_callback(self, message):
+        if len(message.data) == 0:
+            if self.waypoint_active:
+                self.set_target(np.r_[np.zeros(3), self.state[3:]])
+                self.waypoint_active = False
+                self.next_waypoint = None
+            return
         if len(message.data) < 3:
             self.get_logger().warning('Ignoring waypoint with fewer than three values')
             return
         try:
+            if len(message.data) not in (3, 4) and len(message.data) % 4:
+                raise ValueError('waypoint queue must contain complete [x,y,z,yaw] points')
             position = vector(message.data[:3], 3, 'waypoint')
+            following = vector(message.data[4:7], 3, 'next waypoint') if len(message.data) >= 8 else None
             yaw = float(message.data[3]) if len(message.data) >= 4 else self.yaw
             if not math.isfinite(yaw):
                 raise ValueError('waypoint yaw must be finite')
             self.set_target(np.r_[np.zeros(3), position])
+            self.waypoint_active = True
+            self.next_waypoint = following
             self.target_yaw = yaw
         except ValueError as error:
             self.get_logger().warning(str(error))
@@ -251,7 +273,19 @@ class WaypointControlNode(Node):
                     self.reported = True
         else:
             reference = vector(self.value('target_velocity'), 3, 'target_velocity')
-        force = self.system.control_force(self.state, reference)
+        cruise_reference = None
+        if mode == 'state' and self.waypoint_active and self.value('waypoint_cruise_speed') > 0:
+            desired = waypoint_velocity(
+                self.state[3:], self.target[3:], self.next_waypoint,
+                speed=self.value('waypoint_cruise_speed'),
+                braking_acceleration=self.value('waypoint_braking_acceleration'),
+                stopping_distance=self.value('stopping_distance'))
+            # At the final point/corner, the existing position controller brakes
+            # and holds. Otherwise use DLQR's velocity feedback and feedforward.
+            if np.linalg.norm(desired) > 1e-9:
+                cruise_reference = desired
+        force = self.system.control_force(
+            self.state, reference if cruise_reference is None else cruise_reference)
         yaw_error = math.atan2(math.sin(self.target_yaw - self.yaw),
                                math.cos(self.target_yaw - self.yaw))
         torque = np.clip(self.value('kp_yaw') * yaw_error,
@@ -270,6 +304,12 @@ class WaypointControlNode(Node):
             if self.monitor is not None:
                 self.get_logger().info(self.monitor.summary())
             self.get_logger().info(f'Requested motor peak={peak:.3f}N; limit scale={scale:.3f}')
+            if self.waypoint_active:
+                requested_speed = 0. if cruise_reference is None else np.linalg.norm(cruise_reference)
+                self.get_logger().info(
+                    f'Waypoint speed: measured={np.linalg.norm(self.state[:3]):.3f}m/s; '
+                    f'reference={requested_speed:.3f}m/s; '
+                    f'distance={np.linalg.norm(self.target[3:] - self.state[3:]):.3f}m')
 
     def publish_force(self, publisher, force):
         message = Vector3Stamped()

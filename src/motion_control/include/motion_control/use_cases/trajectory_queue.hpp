@@ -52,9 +52,8 @@ public:
   {
     std::vector<std::vector<double>> wps;
 
-        // Replicates numpy.reshape(-1, 4)
+    // Replicates numpy.reshape(-1, 4)
     for (size_t i = 0; i + 3 < msg.data.size(); i += 4) {
-      diagnostics_.write(format_text("Adding segmentation waypoint..."));
       std::vector<double> wp = {
         msg.data[i] - camera_position_[0],
         msg.data[i + 1] - camera_position_[1],
@@ -64,32 +63,32 @@ public:
       wps.push_back(wp);
     }
 
-    if (!wps.empty()) {
-      waypoints_ = wps;
+    waypoints_ = wps; // Overwrite completely, even if empty
+
+    if (waypoints_.empty()) {
+      diagnostics_.write(format_text("Received empty trajectory; clearing downstream queue."));
+    } else {
       diagnostics_.write(format_text("Received %zu segmentation waypoints.", wps.size()));
-            // Send the new route now: the vehicle keeps moving between timer ticks.
-      timer_callback();
     }
+    
+    // Always trigger to propagate clears instantly
+    timer_callback();
   }
 
   void timer_callback()
   {
-    if (!waypoints_.empty()) {
-      std::vector<float> values;
-      for (const auto & wp : waypoints_) {
-        float x = 0.0f, y = 0.0f, z = -29.5f, yaw = 0.0f;
-
-                // Safely pad every waypoint to exactly 4 floats to prevent numpy crashes
-        if (wp.size() >= 2) {x = wp[0]; y = wp[1];}
-        if (wp.size() >= 3) {z = wp[2];}
-        if (wp.size() >= 4) {yaw = wp[3];}
-
-        values.insert(values.end(), {x, y, z, yaw});
-      }
-
-      output_.waypoints(values, waypoints_.size());
-      diagnostics_.write(format_text("Published %zu waypoints.", waypoints_.size()));
+    std::vector<float> values;
+    for (const auto & wp : waypoints_) {
+      float x = 0.0f, y = 0.0f, z = -29.5f, yaw = 0.0f;
+      if (wp.size() >= 2) {x = wp[0]; y = wp[1];}
+      if (wp.size() >= 3) {z = wp[2];}
+      if (wp.size() >= 4) {yaw = wp[3];}
+      values.insert(values.end(), {x, y, z, yaw});
     }
+
+    // Unconditionally publish to ensure target clearing propagates to the PID controller
+    output_.waypoints(values, waypoints_.size());
+    diagnostics_.write(format_text("Published %zu waypoints.", waypoints_.size()));
   }
 
   void stop_callback(const WaypointInput & msg)

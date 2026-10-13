@@ -50,6 +50,34 @@ continuous-equivalent poles on each position axis are approximately
 dominant tau = 1.772527 s. This tuning is slightly overdamped, so no finite
 overshoot peak is expected.
 
+Bringup's `params.yaml` uses a faster waypoint profile:
+`state_weights: [80, 80, 80, 256, 256, 256]` and unchanged
+`force_weights: [0.1, 0.1, 0.1]`. It increases position urgency while retaining
+velocity damping. In the nominal plant, a 0.5 m step reaches 90% in about 2.33 s
+instead of 6.17 s, with approximately 1.7% overshoot. The motor saturation limit,
+sensor freshness checks, and waypoint completion radius are unchanged. These
+are model results; simulator drag and execution speed affect live performance.
+Restart the node to apply changes to these startup-only weights. Increasing
+the legacy `command_multiplier` does not tune DLQR.
+
+Bringup additionally enables `waypoint_cruise_speed: 1.0` m/s with
+`velocity_weights: [400, 400, 400]`. For waypoint commands, DLQR velocity feedback
+tracks a cruise reference on straight queue legs instead of requesting zero
+velocity at every point. The next queued point determines corner speed;
+`waypoint_braking_acceleration: 0.8` m/s^2 sets a square-root braking envelope
+before turns and the final point. At the end the position controller brakes and
+holds. This parameter shapes the reference, not a guaranteed acceleration limit.
+The active waypoint is still reached/reported before the queue advances; no
+waypoints are skipped. An empty queue cancels cruising and holds current position.
+
+`waypoint_cruise_speed: 0.0` restores fixed-target waypoint control and is the
+standalone node default. Cruise speed and braking settings can be updated at
+runtime; gain weights require restart. Explicit `target_state` updates and
+`control_mode=velocity` retain their existing semantics. Cruise speed is a
+velocity reference, not a hard physical speed bound. Periodic logs show DVL
+measured speed, requested speed, and target distance; wall-clock displacement can
+be slower if the simulator runs below real time.
+
 ## State and commands
 
 The node bypasses estimation. With the default `state_source=dvl`, it reads:
@@ -59,7 +87,7 @@ The node bypasses estimation. With the default `state_source=dvl`, it reads:
 | `holocean/odom` | World position directly from pose |
 | `holocean/dvl` | Body-frame measured velocity |
 | `holocean/mag` | Yaw from the reference magnetic direction `[1, 0, 0]` |
-| `/trajectory/waypoint` | `[px, py, pz, optional_yaw]`, fixed position target |
+| `/trajectory/waypoint` | First target plus optional remaining `[x,y,z,yaw]` queue points |
 | `/movement/finished_execution` | Stop motors when true |
 
 For a provider that supplies complete odometry, `state_source=odom` uses its

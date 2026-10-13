@@ -8,13 +8,14 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
     """Find a 6-connected voxel path between two metric positions."""
     start = tuple(map(int, np.floor(start_pos / resolution)))
     goal = tuple(map(int, np.floor(goal_pos / resolution)))
-    if start in occupied or goal in occupied:
-        return []
+    
+    if start in occupied:
+        return [], "start_occupied"
+    if goal in occupied:
+        return [], "goal_occupied"
 
     goal_x, goal_y, goal_z = goal
     initial_h = sum(abs(start[i] - goal[i]) for i in range(3))
-    # Prefer lower remaining distance on equal f, rather than expanding the
-    # entire equal-cost volume. Manhattan remains admissible and consistent.
     open_set = [(initial_h, initial_h, start, 0)]
     came_from = {}
     costs = {start: 0}
@@ -27,7 +28,7 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
     while open_set and expansions < max_steps:
         _, _, current, current_cost = heapq.heappop(open_set)
         if current_cost != costs[current]:
-            continue  # An improved route already superseded this queue entry.
+            continue
         expansions += 1
         if current == goal:
             path = []
@@ -39,7 +40,7 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
             return [
                 (np.asarray(index, dtype=np.float64) + 0.5) * resolution
                 for index in path
-            ]
+            ], "success"
 
         x, y, z = current
         cost = current_cost + 1
@@ -54,8 +55,10 @@ def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
             costs[neighbor] = cost
             h = abs(neighbor[0] - goal_x) + abs(neighbor[1] - goal_y) + abs(neighbor[2] - goal_z)
             heapq.heappush(open_set, (cost + h, h, neighbor, cost))
-    return []
-
+            
+    if expansions >= max_steps:
+        return [], "search_limit_reached"
+    return [], "no_connected_path"
 
 def inflate_occupied(occupied_indices, collision_radius, resolution):
     """Inflate occupied voxels with a precomputed spherical neighborhood."""
@@ -144,18 +147,10 @@ def plan_multi_waypoint_route(current_position, candidates, occupied,
                               resolution, astar_max_steps=50000,
                               current_velocity=None, reversal_weight=2.0,
                               candidate_utilities=None):
-    """Connect NBVs with collision-safe A*, visiting higher utilities first.
-
-    Utilities align with candidates. Travel/reversal cost breaks utility ties;
-    omitting utilities preserves distance-based ordering for generic callers.
-    Re-evaluate ordering only from endpoints of successful, validated legs.
-    """
     utilities = (np.zeros(len(candidates)) if candidate_utilities is None
                  else np.asarray(candidate_utilities, dtype=float))
-    if utilities.shape != (len(candidates),) or not np.all(np.isfinite(utilities)):
-        raise ValueError('candidate_utilities must contain one finite value per candidate')
     if not candidates:
-        return np.empty((0, 3)), np.empty((0, 3))
+        return np.empty((0, 3)), np.empty((0, 3)), "no_candidates"
 
     remaining = list(zip(candidates, utilities))
     full_path = []
@@ -165,6 +160,9 @@ def plan_multi_waypoint_route(current_position, candidates, occupied,
                  else np.asarray(current_velocity, dtype=np.float64))
     if np.linalg.norm(direction) < 0.05:
         direction = np.zeros(3)
+        
+    last_failure_reason = "no_candidates"
+
     while remaining:
         scores = []
         for (viewpoint, _), utility in remaining:
@@ -174,24 +172,33 @@ def plan_multi_waypoint_route(current_position, candidates, occupied,
                 distance * np.linalg.norm(direction), 1e-9)
             travel_cost = distance + reversal_weight * max(0.0, -alignment)
             scores.append((-utility, travel_cost))
+            
         index = min(range(len(remaining)), key=scores.__getitem__)
         (viewpoint, target), _ = remaining.pop(index)
-        segment = astar_3d(
+        
+        segment, reason = astar_3d(
             start, viewpoint, occupied, resolution, max_steps=astar_max_steps)
+            
         if not segment:
+            if reason == "start_occupied" and len(full_path) == 0:
+                return np.empty((0, 3)), np.empty((0, 3)), "start_occupied"
+            last_failure_reason = reason
             continue
+
         segment = np.asarray(segment)
-        # Retain metric endpoints: voxel centers introduce a false initial turn.
         if len(segment) == 1:
             segment = np.vstack((start, viewpoint))
         else:
             segment[0] = start
             segment[-1] = viewpoint
-        keep = np.concatenate(([True], np.linalg.norm(
-            np.diff(segment, axis=0), axis=1) > 1e-9))
+            
+        keep = np.concatenate(([True], np.linalg.norm(np.diff(segment, axis=0), axis=1) > 1e-9))
         segment = segment[keep]
+        
         if not path_is_collision_free(segment, occupied, resolution):
+            last_failure_reason = "leg_validation_failed"
             continue
+            
         if full_path and np.allclose(full_path[-1], segment[0]):
             segment = segment[1:]
         full_path.extend(segment)
@@ -199,46 +206,46 @@ def plan_multi_waypoint_route(current_position, candidates, occupied,
         direction = viewpoint - start
         start = viewpoint
 
+    if len(full_path) == 0:
+        return np.empty((0, 3)), np.empty((0, 3)), last_failure_reason
     return (np.asarray(full_path, dtype=float).reshape(-1, 3),
-            np.asarray(target_tracking, dtype=float).reshape(-1, 3))
+            np.asarray(target_tracking, dtype=float).reshape(-1, 3), "success")
 
 
-def generate_smooth_trajectory(
-        path, targets, num_points=200, smoothing=2.0,
-        sampling_spacing=None):
-    """Generate a smooth 4D trajectory with optional dense sampling."""
-    if len(path) < 4 or len(targets) != len(path):
+def generate_smooth_trajectory(path, targets, num_points=200, smoothing=2.0, sampling_spacing=None):
+    if len(path) == 0 or len(targets) != len(path):
         return np.empty((0, 4))
 
     path = np.asarray(path, dtype=np.float64)
     targets = np.asarray(targets, dtype=np.float64)
-    keep = np.concatenate(([True], np.linalg.norm(
-        np.diff(path, axis=0), axis=1) > 1e-9))
+    keep = np.concatenate(([True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9))
     path, targets = path[keep], targets[keep]
-    if len(path) < 4:
+    
+    if len(path) == 0:
         return np.empty((0, 4))
-    yaw = np.unwrap(np.arctan2(
-        targets[:, 1] - path[:, 1], targets[:, 0] - path[:, 0]))
+        
+    yaw = np.unwrap(np.arctan2(targets[:, 1] - path[:, 1], targets[:, 0] - path[:, 0]))
+
+    # EXPLICIT SHORT ROUTE HANDLING
+    if len(path) == 1:
+        return np.column_stack((path, yaw))
+        
+    k = min(3, len(path) - 1)  # k=1 (straight), k=2 (quadratic), k=3 (cubic)
+    
     distance = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]
     parameters = distance / distance[-1]
     try:
-        spline, _ = splprep([
-            path[:, 0], path[:, 1], path[:, 2],
-        ], u=parameters, s=smoothing, k=3)
+        spline, _ = splprep([path[:, 0], path[:, 1], path[:, 2]], u=parameters, s=smoothing, k=k)
     except (ValueError, TypeError):
         return np.empty((0, 4))
 
     sample_count = int(num_points)
     if sampling_spacing is not None and sampling_spacing > 0.0:
-        route_length = np.linalg.norm(np.diff(path, axis=0), axis=1).sum()
-        sample_count = max(
-            sample_count,
-            int(np.ceil(route_length / sampling_spacing * 10.0)) + 1,
-        )
+        route_length = distance[-1]
+        sample_count = max(sample_count, int(np.ceil(route_length / sampling_spacing * 10.0)) + 1)
 
     samples = np.linspace(0.0, 1.0, sample_count)
     values = splev(samples, spline)
-    # Heading changes must not bend the XYZ spline or introduce yaw overshoot.
     smooth_yaw = np.interp(samples, parameters, yaw)
     return np.column_stack(values + [smooth_yaw])
 

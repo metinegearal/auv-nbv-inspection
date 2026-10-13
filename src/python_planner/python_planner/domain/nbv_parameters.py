@@ -31,4 +31,7 @@ DEFAULT_NBV_PARAMETERS = {
     'collision_distance_offset': 0.1,
     'utility_gain_weight': 1.0,
     'utility_cost_weight': 1.0,
+    'seabed_enabled': True,
+    'seabed_decay_height': 0.5,
+    'seabed_penalty_strength': 0.95,
 }

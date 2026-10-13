@@ -17,7 +17,7 @@ planner_node:
     # Bound support locally so neighbors across small holes cannot hide edges.
     nbv_frontier_radius: 0.5
     nbv_frontier_min_neighbors: 3
-    nbv_frontier_angle_threshold_deg: 80.0
+    nbv_frontier_angle_threshold_deg: 90.0
 
     # Frontier clustering
     nbv_cluster_fov_radius: 1.0
@@ -38,6 +38,12 @@ planner_node:
     # Gain: sum(cos(incidence) * (1 + complexity_weight * PCA_complexity))
     nbv_complexity_weight: 30.0
     nbv_min_raw_gain: 0.5
+
+    # Automatically infer floor height from broad horizontal map support.
+    nbv_seabed_enabled: true
+    # Gain multiplier = 1 - strength * exp(-height_above_floor / decay_height).
+    nbv_seabed_decay_height: 0.5
+    nbv_seabed_penalty_strength: 0.95
 
     # Kinematic cost weights and nearest-obstacle penalty
     nbv_distance_weight: 1.0
