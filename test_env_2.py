@@ -1,7 +1,17 @@
 import argparse
 import csv
+import os
 from pathlib import Path
 import sys
+
+# Open3D's native Wayland startup can load a GTK/libdecor plugin that expects
+# obsolete GNOME font settings and then fails to initialize GLEW. Use XWayland
+# when available, before importing Open3D or initializing any GUI libraries.
+if sys.platform == "linux" and os.environ.get("DISPLAY") and (
+        os.environ.get("WAYLAND_DISPLAY") or os.environ.get("XDG_SESSION_TYPE") == "wayland"):
+    os.environ["GDK_BACKEND"] = "x11"
+    os.environ["XDG_SESSION_TYPE"] = "x11"
+    os.environ.pop("WAYLAND_DISPLAY", None)
 
 import numpy as np
 import open3d as o3d
@@ -160,10 +170,31 @@ def filter_observed_clusters(clusters, trajectory, yaws, parameters):
 
 
 def add_sphere(geometries, position, radius, color):
-    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius)
+    # Tiny candidate markers do not need the default 1,520-triangle sphere.
+    sphere = o3d.geometry.TriangleMesh.create_sphere(
+        radius=radius, resolution=6 if radius <= 0.08 else 12)
+    sphere.compute_vertex_normals()
     sphere.translate(position)
     sphere.paint_uniform_color(color)
     geometries.append(sphere)
+
+
+def batch_marker_meshes(geometries):
+    """Combine sphere markers into one draw object, retaining per-vertex colors."""
+    meshes = [g for g in geometries if isinstance(g, o3d.geometry.TriangleMesh)]
+    if not meshes:
+        return geometries
+    offsets = np.cumsum([0] + [len(mesh.vertices) for mesh in meshes[:-1]])
+    markers = o3d.geometry.TriangleMesh()
+    markers.vertices = o3d.utility.Vector3dVector(
+        np.concatenate([np.asarray(mesh.vertices) for mesh in meshes]))
+    markers.triangles = o3d.utility.Vector3iVector(np.concatenate([
+        np.asarray(mesh.triangles) + offset for mesh, offset in zip(meshes, offsets)]))
+    markers.vertex_colors = o3d.utility.Vector3dVector(
+        np.concatenate([np.asarray(mesh.vertex_colors) for mesh in meshes]))
+    markers.vertex_normals = o3d.utility.Vector3dVector(
+        np.concatenate([np.asarray(mesh.vertex_normals) for mesh in meshes]))
+    return [g for g in geometries if not isinstance(g, o3d.geometry.TriangleMesh)] + [markers]
 
 
 def calculate_future_trajectory(auv_position, auv_yaw, winners, occupied_points, resolution):
@@ -345,23 +376,13 @@ def main():
 
     if not args.no_gui:
         print("Gray: Surface | Green: Trajectory/start | Blue: Last point/AUV | Red: Remaining frontiers")
-        print("Magenta: Candidates | Yellow: Cluster winners | Cyan: Global best NBV | Labels: Cluster IDs")
+        print("Magenta: Candidates | Yellow: Cluster winners | Cyan: Global best NBV")
         if args.future_trajectory:
             print("Orange: Collision-checked future trajectory/end")
 
-        def add_cluster_labels(visualizer):
-            for winner in winners.values():
-                label_position = winner['position'] + np.array([0.0, 0.0, 0.25])
-                label = f"Cluster {winner['cluster_id']}"
-                if winner is best:
-                    label += " (best)"
-                visualizer.add_3d_label(label_position, label)
-
-        # The GUI visualizer supports screen-facing text anchored to 3D positions.
-        o3d.visualization.draw(
-            geometries, title="NBV cluster winners", raw_mode=True,
-            bg_color=(1.0, 1.0, 1.0, 1.0), show_skybox=False,
-            line_width=3, on_init=add_cluster_labels)
+        # The legacy visualizer displays geometry without 3D text labels.
+        o3d.visualization.draw_geometries(
+            batch_marker_meshes(geometries), window_name="NBV cluster winners")
 
 
 if __name__ == "__main__":

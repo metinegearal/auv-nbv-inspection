@@ -1,0 +1,9 @@
+........F                                                                [100%]
+=================================== FAILURES ===================================
+___ test_cruise_finishes_short_waypoint_queue_faster_and_holds_final_target ____
+src/motion_control/test/test_bringup_speed.py:110: in test_cruise_finishes_short_waypoint_queue_faster_and_holds_final_target
+    assert cruise_time < .65 * stop_time
+E   assert 6.299999999999987 < (0.65 * 9.499999999999977)
+=========================== short test summary info ============================
+FAILED src/motion_control/test/test_bringup_speed.py::test_cruise_finishes_short_waypoint_queue_faster_and_holds_final_target
+1 failed, 8 passed in 7.75s
