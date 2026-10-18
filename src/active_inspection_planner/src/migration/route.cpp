@@ -65,7 +65,8 @@ std::vector<Candidate> candidates(const Json &j) {
   for (const auto &v : j)
     out.push_back({vec3(v.at("position")), vec3(v.at("target")),
                    v.value("utility", 0.0), v.value("raw_gain", 0.0),
-                   v.value("raw_cost", 0.0), v.value("cluster_id", -1)});
+                   v.value("raw_cost", 0.0), v.value("cluster_id", -1),
+                   v.contains("raw_gain") && v.contains("raw_cost")});
   return out;
 }
 double monotonic() {
@@ -163,6 +164,170 @@ SearchResult astar(const V3 &start_pos, const V3 &goal_pos,
                                   : "no_connected_path",
           expansions};
 }
+SearchResult astar_view_standoff(const V3 &start, const V3 &goal,
+                                 const V3 &target, const Voxels &occupied,
+                                 const Voxels &raw, double r,
+                                 const V3 &camera_offset, double max_range,
+                                 double max_extension, int max_steps) {
+  auto exact = astar(start, goal, occupied, r, max_steps);
+  if (exact.reason != "goal_occupied" && exact.path.empty())
+    return exact;
+  double yaw = std::atan2(target.y() - goal.y(), target.x() - goal.x());
+  V3 camera = goal + body_rotation(0, 0, yaw) * camera_offset;
+  V3 outward = camera - target;
+  double range = outward.norm();
+  if (!std::isfinite(range) || range < 1e-9)
+    return {{}, "invalid_view_direction", 0};
+  outward /= range;
+  auto visible = [&](const V3 &from) {
+    double terminal = std::min(2 * r, (from - target).norm() * .5);
+    return (from - target).norm() <= max_range &&
+           clearance_free({from, target + terminal * outward}, raw, r, 0);
+  };
+  if (!exact.path.empty())
+    return visible(camera) ? exact : SearchResult{{}, "goal_view_occluded", exact.expansions};
+  if (max_extension <= 0)
+    return exact;
+  double limit = std::min(max_extension, max_range - range);
+  SearchResult result{{}, "no_safe_goal_viewpoint", 0};
+  // Preserve the selected viewing ray. Moving farther away keeps its viewing
+  // angle while allowing the vehicle footprint to clear the inflated surface.
+  for (double extension = std::min(r, limit); extension > 0;) {
+    V3 next_camera = camera + extension * outward;
+    V3 next_goal = vehicle_viewpoint(next_camera, target, camera_offset);
+    if (!occupied.count(voxel(next_goal, r))) {
+      // The cluster target lies on a surface: exclude only its terminal cell
+      // neighborhood, while rejecting intervening mapped occluders.
+      if (visible(next_camera)) {
+        auto leg = astar(start, next_goal, occupied, r,
+                         std::max(0, max_steps - result.expansions));
+        result.expansions += leg.expansions;
+        if (!leg.path.empty()) {
+          if (leg.path.size() == 1)
+            leg.path = {start, next_goal};
+          else {
+            leg.path.front() = start;
+            leg.path.back() = next_goal;
+          }
+          if (collision_free(leg.path, occupied, r))
+            return {leg.path, "success_adjusted_standoff", result.expansions};
+        }
+        if (result.expansions >= max_steps)
+          return {{}, "search_limit_reached", result.expansions};
+      }
+    }
+    if (extension >= limit - 1e-9)
+      break;
+    extension = std::min(extension + r, limit);
+  }
+  return result;
+}
+ViewProbe probe_nbv_views(const V3 &goal, const V3 &target,
+                          const Voxels &occupied, const Voxels &raw, double r,
+                          const V3 &camera_offset, double max_range,
+                          double max_extension) {
+  ViewProbe probe;
+  double yaw = std::atan2(target.y() - goal.y(), target.x() - goal.x());
+  V3 original_camera = goal + body_rotation(0, 0, yaw) * camera_offset;
+  V3 outward = original_camera - target;
+  double range = outward.norm();
+  if (!(r > 0) || !std::isfinite(range) || range < 1e-9 ||
+      !std::isfinite(max_range) || max_range < range)
+    return probe;
+  double limit = std::min(max_range, range + std::max(0., max_extension));
+  Points directions{outward / range};
+  // A 15-degree spherical sweep includes both vertical poles. This is a
+  // finite visibility/clearance probe, not proof of continuous reachability.
+  for (int elevation = -75; elevation <= 75; elevation += 15)
+    for (int azimuth = 0; azimuth < 360; azimuth += 15) {
+      double e = elevation * pi / 180, a = azimuth * pi / 180;
+      directions.emplace_back(std::cos(e) * std::cos(a),
+                              std::cos(e) * std::sin(a), std::sin(e));
+    }
+  directions.emplace_back(0, 0, -1);
+  directions.emplace_back(0, 0, 1);
+  // Rays remain inside the sensor sphere. Restrict the raw-map slab tests to
+  // intersecting cells so a global map does not multiply every local ray cost.
+  Voxels local_raw, seen_goals;
+  for (const auto &cell : raw) {
+    V3 lo(cell[0] * r, cell[1] * r, cell[2] * r);
+    if ((lo.array() <= (target.array() + max_range)).all() &&
+        ((lo.array() + r) >= (target.array() - max_range)).all())
+      local_raw.insert(cell);
+  }
+  for (const auto &direction : directions) {
+    ++probe.directions_checked;
+    bool clear = false;
+    for (double distance = range;; distance = std::min(distance + r, limit)) {
+      V3 camera = target + distance * direction;
+      V3 next_goal = vehicle_viewpoint(camera, target, camera_offset);
+      double heading = std::atan2(target.y() - next_goal.y(), target.x() - next_goal.x());
+      camera = next_goal + body_rotation(0, 0, heading) * camera_offset;
+      V3 sight = camera - target;
+      double actual_range = sight.norm();
+      if (actual_range > 1e-9 && actual_range <= max_range + 1e-9 &&
+          !occupied.count(voxel(next_goal, r)) &&
+          clearance_free({camera, target + sight.normalized() * std::min(2 * r, actual_range * .5)},
+                         local_raw, r, 0)) {
+        clear = true;
+        if (seen_goals.insert(voxel(next_goal, r)).second)
+          probe.goals.push_back(next_goal);
+      }
+      if (distance >= limit - 1e-9)
+        break;
+    }
+    probe.clear_directions += int(clear);
+  }
+  return probe;
+}
+SearchResult astar_view_surround(const V3 &start, const V3 &goal,
+                                const V3 &target, const Voxels &occupied,
+                                const Voxels &raw, double r,
+                                const V3 &camera_offset, double max_range,
+                                double max_extension, int max_steps) {
+  // Keep a working selected view and its outward adjustment unchanged.
+  auto result = astar_view_standoff(start, goal, target, occupied, raw, r,
+                                    camera_offset, max_range, max_extension, max_steps);
+  if (!result.path.empty() || result.reason == "start_occupied" ||
+      result.reason == "search_limit_reached" || result.reason == "invalid_view_direction")
+    return result;
+  auto probe = probe_nbv_views(goal, target, occupied, raw, r,
+                               camera_offset, max_range, max_extension);
+  result.directions_checked = probe.directions_checked;
+  result.clear_directions = probe.clear_directions;
+  if (!probe.directions_checked)
+    return result;
+  if (probe.goals.empty()) {
+    result.reason = "all_nbv_rays_collide";
+    return result;
+  }
+  std::stable_sort(probe.goals.begin(), probe.goals.end(), [&](const auto &a, const auto &b) {
+    return (a - start).squaredNorm() < (b - start).squaredNorm();
+  });
+  for (const auto &next_goal : probe.goals) {
+    if (result.expansions >= max_steps) {
+      result.reason = "search_limit_reached";
+      return result;
+    }
+    auto leg = astar(start, next_goal, occupied, r, max_steps - result.expansions);
+    result.expansions += leg.expansions;
+    if (!leg.path.empty()) {
+      if (leg.path.size() == 1)
+        leg.path = {start, next_goal};
+      else {
+        leg.path.front() = start;
+        leg.path.back() = next_goal;
+      }
+      if (collision_free(leg.path, occupied, r)) {
+        result.path = std::move(leg.path);
+        result.reason = "success_surrounding_view";
+        return result;
+      }
+    }
+  }
+  result.reason = result.expansions >= max_steps ? "search_limit_reached" : "no_connected_path";
+  return result;
+}
 Voxels inflate(const Voxels &occupied, double radius, double r) {
   if (occupied.empty())
     return {};
@@ -242,7 +407,9 @@ Trajectory reconnect(const Trajectory &path, const V3 &pos, double yaw,
 }
 Route plan_route(const V3 &position, const std::vector<Candidate> &cs,
                  const Voxels &occupied, double r, int max_steps, V3 direction,
-                 double reversal) {
+                 double reversal,
+                 const std::function<SearchResult(const V3 &, const Candidate &)> &goal_fallback,
+                 bool single_goal) {
   if (cs.empty())
     return {{}, {}, "no_candidates"};
   auto remaining = cs;
@@ -264,9 +431,18 @@ Route plan_route(const V3 &position, const std::vector<Candidate> &cs,
         [&](const auto &a, const auto &b) { return score(a) < score(b); });
     Candidate c = *it;
     remaining.erase(it);
-    auto result = astar(start, c.position, occupied, r, max_steps);
+    auto result = single_goal && goal_fallback ? goal_fallback(start, c)
+                   : astar(start, c.position, occupied, r, max_steps);
+    if (!single_goal && result.reason == "goal_occupied" && goal_fallback) {
+      result = goal_fallback(start, c);
+    }
+    if (!result.path.empty() && (result.reason == "success_adjusted_standoff" ||
+                                 result.reason == "success_surrounding_view"))
+      c.position = result.path.back();
     auto segment = result.path;
     if (segment.empty()) {
+      if (single_goal && result.reason == "candidate_pool_changed")
+        return {{}, {}, result.reason};
       if (result.reason == "start_occupied" && out.path.empty())
         return {{}, {}, result.reason};
       out.reason = result.reason;
@@ -292,6 +468,8 @@ Route plan_route(const V3 &position, const std::vector<Candidate> &cs,
       keep.erase(keep.begin());
     out.path.insert(out.path.end(), keep.begin(), keep.end());
     out.targets.insert(out.targets.end(), keep.size(), c.target);
+    if (single_goal)
+      break;
     direction = c.position - start;
     start = c.position;
   }

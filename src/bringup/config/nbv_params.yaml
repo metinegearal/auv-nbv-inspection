@@ -3,7 +3,8 @@ planner_node:
   ros__parameters:
     # World-space target filtering and point-cloud preprocessing
     nbv_z_min_target: -300.0
-    # Candidate surface query centers within this distance of the AUV (meters).
+    # Refresh frontier geometry within this distance of the camera (meters).
+    # C++ retains discovered distant clusters and rescores them globally.
     nbv_exploration_radius: 10.0
     nbv_voxel_downsample_size: 0.25
     nbv_outlier_neighbors: 15
@@ -45,14 +46,14 @@ planner_node:
     nbv_seabed_decay_height: 0.5
     nbv_seabed_penalty_strength: 0.95
 
-    # Kinematic cost weights and nearest-obstacle penalty
-    nbv_distance_weight: 1.0
+    # Favor shorter travel more strongly relative to turning and obstacle proximity.
+    nbv_distance_weight: 3.0
     nbv_rotation_weight: 0.5
     nbv_collision_weight: 2.0
     nbv_collision_distance_threshold: 0.8
     nbv_collision_distance_offset: 0.2
 
     # Utility = gain_weight * normalized_gain - cost_weight * normalized_cost.
-    # Lower cost_weight (e.g. 0.5) to reduce cost's overall effect.
+    # Balance gain and cost after normalization so distance can affect selection.
     nbv_utility_gain_weight: 1.5
-    nbv_utility_cost_weight: 0.5
+    nbv_utility_cost_weight: 1.5

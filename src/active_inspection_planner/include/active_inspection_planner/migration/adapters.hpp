@@ -10,6 +10,7 @@ public:
   explicit Octomap(double resolution) : tree(resolution) {}
   void insert(const Points &, const V3 &, double) override;
   Points occupied() const override;
+  Voxels collision_voxels(double resolution) const override;
   size_t leaves() const override { return tree.getNumLeafNodes(); }
   void write(const std::string &path) override;
   void load(const std::string &path);

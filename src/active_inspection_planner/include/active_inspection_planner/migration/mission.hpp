@@ -8,6 +8,12 @@ struct OccupancyMap {
   virtual ~OccupancyMap() = default;
   virtual void insert(const Points &, const V3 &, double) = 0;
   virtual Points occupied() const = 0;
+  virtual Voxels collision_voxels(double resolution) const {
+    Voxels keys;
+    for (const auto &p : occupied())
+      keys.insert(voxel(p, resolution));
+    return keys;
+  }
   virtual size_t leaves() const = 0;
   virtual void write(const std::string &) = 0;
 };
@@ -38,11 +44,21 @@ public:
   void tick();
   void close();
   Points depth_points(const DepthFrame &);
-  bool plan_and_publish(std::vector<Candidate>, const Voxels &);
-  bool publish_trajectory(const Trajectory &, const Voxels &);
+  bool plan_and_publish(std::vector<Candidate>, const Voxels &, const Voxels * = nullptr,
+                        std::vector<Candidate> * = nullptr);
+  bool publish_trajectory(const Trajectory &, const Voxels &, bool = false);
   bool active_safe(const Voxels &);
   bool stalled(const V3 &, const Trajectory &);
-  void cancel();
+  void cancel(const Voxels * = nullptr, const Voxels * = nullptr);
+  bool recover_clearance(const Voxels &, const Voxels &);
+  void update_inspection_progress(const Voxels &);
+  bool target_observed(const V3 &) const;
+  void record_inspection_attempt(const V3 &, const std::string &);
+  void blacklist_exhausted_target(const V3 &);
+  void blacklist_collision_target(const V3 &);
+  double blacklist_radius(const V3 &) const;
+  double retry_radius() const;
+  bool collision_blacklisted(const V3 &) const;
   void expire_blacklist();
   bool blacklist_failed();
   Json snapshot();
@@ -61,15 +77,30 @@ public:
   Trajectory active_trajectory;
   Points selected_targets, visited_targets, blacklisted_targets;
   std::map<std::array<double, 3>, double> blacklist_expiries;
+  std::map<std::array<double, 3>, double> blacklist_radii;
+  std::map<std::array<double, 3>, double> collision_blacklist_radii;
   std::vector<std::pair<V3, double>> observation_history;
   std::optional<V3> failed_target, progress_position;
   std::optional<double> progress_time;
   std::string plan_failure, empty_reason, active_failure;
   Seabed seabed;
+  NBVCache nbv_cache;
+  bool recovering_clearance = false;
+  double recovery_retry_time = 0;
+  Voxels recovery_obstacles;
+  struct InspectionAttempt {
+    V3 target;
+    int count = 0;
+    double started = 0;
+  };
+  struct InspectionGoal { V3 position, target; };
+  std::optional<InspectionGoal> inspection_goal;
+  std::vector<InspectionAttempt> inspection_attempts;
+  bool depth_has_observations = false;
   std::function<std::vector<Candidate>(
       const Points &, const V3 &, const V3 &,
       const std::vector<std::pair<V3, double>> &, Json, Timing, Diagnostic)>
-      calculate = nbv;
+      calculate;
 
 private:
   struct State {

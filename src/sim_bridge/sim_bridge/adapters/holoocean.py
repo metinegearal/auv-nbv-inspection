@@ -11,7 +11,7 @@ class HoloOceanSessions:
         self.scenario = scenario
     @contextmanager
     def open(self):
-        with self.make(scenario_cfg=self.scenario) as environment:
+        with self.make(scenario_cfg=self.scenario, verbose=True) as environment:
             yield HoloOceanSession(environment)
 
 class HoloOceanSession:

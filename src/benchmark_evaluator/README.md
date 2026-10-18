@@ -1,5 +1,40 @@
 # Measured motion control responses
 
+## Permanent planner ban spheres
+
+The benchmark logger incrementally reads `planner_nbv_filters.jsonl` from its
+`results_dir` once per second and saves `permanent_ban_spheres.json`. Each sphere
+has its original map-coordinate centre, radius in metres, exclusion reason, and
+first recorded iteration/frame. The snapshot includes permanent collision bans
+(default 1 m), permanent retry bans (default 0.5 m), and retry-budget exclusions reconstructed
+from the original attempt history. Temporary cooldowns and observed targets are
+excluded. New planner logs clear the previous mission's sphere set; the saved
+data is for inspection and does not restore bans into a later planner mission.
+Completion/shutdown reports also archive `permanent_ban_spheres_TIMESTAMP.json`.
+Keep planner filter logging enabled and use the same results directory for both
+the planner and benchmark logger.
+
+Export an already recorded run from the workspace root:
+
+```bash
+ros2 run benchmark_evaluator save_planner_bans --results-dir results
+```
+
+`test_env_2.py` refreshes this snapshot from the current planner log beside the
+selected map when opened, then loads it. An explicit snapshot is left unchanged.
+It draws labelled dark red wire spheres at their actual radii and removes those
+regions from the preview's candidates before utility normalization. Override the
+snapshot with `--ban-spheres /path/to/permanent_ban_spheres.json`; a missing
+snapshot leaves the usual viewer available without spheres.
+
+Tune the planner's `route_collision_blacklist_radius_m` and
+`route_blacklist_radius_m` in bringup's `config/params.yaml`, then restart the
+planner. The recorder uses the radius and canonical centre emitted by that run;
+changing YAML does not resize old saved spheres. Older logs retain their
+historical 0.5 m retry-matching fallback.
+
+## Motion response measurements
+
 `run_baselines` observes `/trajectory/waypoint` and `holocean/odom`. It measures
 the first XYZ target in the waypoint array, matching the controller's active
 command. Repeated commands and yaw-only changes do not reset a position response.
