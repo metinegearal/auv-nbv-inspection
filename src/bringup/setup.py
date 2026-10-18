@@ -13,7 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'),
-         ['launch/mapper.launch.py', 'launch/planner.launch.py']),
+         ['launch/mapper.launch.py', 'launch/planner.launch.py', 'launch/live_viewer.launch.py']),
         (os.path.join('share', package_name, 'config'),
          ['config/params.yaml', 'config/nbv_params.yaml', 'config/holoocean_config_sub.json',
           'config/README.md']),
