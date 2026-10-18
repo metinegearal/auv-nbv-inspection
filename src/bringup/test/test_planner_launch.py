@@ -61,7 +61,7 @@ def test_bringup_selects_one_planner_and_keeps_parameter_precedence(
     resources = evaluate_parameters(context, planner._Node__parameters)
     assert [str(path) for path in resources] == [str(nbv), str(main)]
     if filename == 'mapper.launch.py':
-        assert len(nodes) == 6
+        assert len(nodes) == 7
         assert {node.node_package for node in nodes} == {
             package, 'sim_bridge', 'perception', 'motion_control', 'benchmark_evaluator'}
     else:
@@ -75,3 +75,24 @@ def test_bringup_rejects_unknown_planner(filename, monkeypatch):
     context.launch_configurations['planner_implementation'] = 'invalid'
     with pytest.raises((RuntimeError, ValueError), match='planner_implementation'):
         expand(description, context)
+
+
+@pytest.mark.parametrize('enabled', ['true', 'false'])
+def test_live_viewer_can_be_disabled_without_affecting_planner(enabled, monkeypatch):
+    context = LaunchContext()
+    context.launch_configurations['live_viewer'] = enabled
+    nodes = expand(load_launch('mapper.launch.py', monkeypatch), context)
+    viewer = next(node for node in nodes if node.node_executable == 'live_viewer')
+    assert viewer.node_package == 'benchmark_evaluator'
+    assert viewer.condition.evaluate(context) == (enabled == 'true')
+    assert len([node for node in nodes if node.node_package == 'active_inspection_planner']) == 1
+
+
+def test_standalone_viewer_uses_custom_bringup_parameters(monkeypatch):
+    context = LaunchContext()
+    context.launch_configurations['params_file'] = '/custom/viewer.yaml'
+    nodes = expand(load_launch('live_viewer.launch.py', monkeypatch), context)
+    assert len(nodes) == 1
+    assert nodes[0].node_executable == 'live_viewer'
+    assert [str(path) for path in evaluate_parameters(context, nodes[0]._Node__parameters)] == [
+        '/custom/viewer.yaml']

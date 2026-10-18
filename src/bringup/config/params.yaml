@@ -96,6 +96,28 @@ run_baselines:
     # Draw the reference rectangles and pipes in the trajectory overview.
     show_reference_objects: false
 
+live_viewer:
+  ros__parameters:
+    # Match planner_node.octomap_path; maps refresh at planner snapshot saves.
+    map_path: results/final_map_ros2.bt
+    map_poll_period_s: 1.0
+    render_hz: 20.0
+    # Display-only downsampling and spatial chunks; unchanged chunks stay on the GPU.
+    voxel_size_m: 0.2
+    chunk_size_m: 4.0
+    max_chunks_per_frame: 8
+    point_size: 3.0
+    window_width: 1280
+    window_height: 800
+    trajectory_topic: object/areaWaypoints
+    odometry_topic: holocean/odom
+    completion_topic: /movement/finished_execution
+    show_target_frontiers: true
+    # Empty follows map_path's directory; reads existing C++ planner diagnostics.
+    frontier_log_path: ""
+    frontier_poll_period_s: 0.5
+    frontier_marker_radius_m: 0.35
+
 depth_estimation:
   ros__parameters:
     sync_queue_size: 1

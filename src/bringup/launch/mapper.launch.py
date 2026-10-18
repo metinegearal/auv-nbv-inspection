@@ -2,6 +2,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from bringup.planner_launch import launch_planner, planner_implementation_argument
@@ -41,6 +42,8 @@ def generate_launch_description():
         declare_nbv_params_file_cmd,
         declare_holo_config_cmd,
         planner_implementation_argument(),
+        DeclareLaunchArgument('live_viewer', default_value='true',
+                              description='Open the live map and planned trajectory viewer'),
         
         # Now pass the LaunchConfigurations into the nodes instead of the hardcoded strings
         Node(
@@ -73,5 +76,10 @@ def generate_launch_description():
             executable='run_baselines',
             name='run_baselines',
             parameters=[params_file]
-        )
+        ),
+        Node(
+            package='benchmark_evaluator', executable='live_viewer', name='live_viewer',
+            parameters=[params_file], condition=IfCondition(LaunchConfiguration('live_viewer')),
+            output='screen'
+        ),
     ])

@@ -87,6 +87,55 @@ CSV metadata gives total and retained sample counts. No response chart is
 generated if no nonzero position step was observed. Existing benchmark outputs
 and their completion behavior remain available.
 
+## Live map and planned trajectory
+
+`live_viewer` is a separate ROS node with an Open3D window. Full bringup starts it
+by default; use `ros2 launch bringup mapper.launch.py live_viewer:=false` for
+headless runs. To attach it to an existing run:
+
+```bash
+ros2 launch bringup live_viewer.launch.py
+```
+
+Tune the `live_viewer.ros__parameters` section of `bringup/config/params.yaml`.
+Build with the Python environment that contains Open3D and `pyoctomap`
+(`envHolo` in this workspace): after activating it and sourcing ROS, use
+`python -m colcon build --packages-select benchmark_evaluator bringup --symlink-install`.
+This makes the installed node entry point use that environment's interpreter.
+Set `map_path` to match the planner's `octomap_path`. The viewer shows occupied
+map leaf centers, the latest published planned trajectory in cyan, and the
+vehicle in orange. The active frontier target has a yellow wire sphere and a
+yellow line from the planned viewpoint. Drag to orbit, scroll to zoom, and
+press **F** to fit the map.
+Closing the window stops only the viewer. A viewer attached mid-run receives
+the trajectory on its next publication; route-clear and completion messages
+remove the displayed trajectory.
+
+The target overlay follows the C++ planner's existing `inspection_attempt_started`
+and cancellation/observation/completion diagnostics. It shows the selected
+frontier centroid, rather than recomputing frontier points or showing unselected
+candidates. Keep the planner's `nbv_filter_logging` enabled. The viewer reads
+`planner_nbv_filters.jsonl` beside `map_path`, or an explicit `frontier_log_path`.
+It polls on a background worker at `frontier_poll_period_s` (default 0.5 s),
+uploads marker geometry only on changes, and hides it immediately on a live
+route clear. Initial attachment searches backwards in bounded 128 KiB blocks;
+subsequent reads consume only appended bytes. A missing log leaves the map and
+trajectory usable. `show_target_frontiers` disables the overlay and its polling;
+`frontier_marker_radius_m` adjusts its display radius (default 0.35 m).
+
+Map updates follow the planner's snapshot saves, normally at planning cycles.
+An unchanged file costs only a metadata check. A worker reads a stable copy of
+each changed snapshot and computes spatial differences, retaining distant map
+regions. Only changed chunks are uploaded; deleted chunks are removed. The
+full snapshot still needs decoding because the planner does not publish map
+deltas. Occupied leaves are sampled without expanding free-space voxels.
+`voxel_size_m` limits display density, `chunk_size_m` sets update granularity,
+and `max_chunks_per_frame` bounds geometry uploads per frame. File polling and
+render rates are independent. Camera framing is preserved after the first map
+load. Partial writes retain the last valid display until a complete snapshot
+arrives. Supports the full ColorOcTree/OcTree files written by the planners
+(including their `.bt` filenames), rather than compact binary OctoMap exports.
+
 ## Evaluator parameters
 
 | Parameter | Default | Meaning |
