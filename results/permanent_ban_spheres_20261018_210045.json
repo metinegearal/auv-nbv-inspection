@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "coordinate_frame": "map",
+  "scope": "mission",
+  "source_log": "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/planner_nbv_filters.jsonl",
+  "spheres": [
+    {
+      "center": [
+        356.5999966106481,
+        827.1111083999276,
+        -296.06666666517657
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 717,
+      "frame_id": 5775
+    },
+    {
+      "center": [
+        358.1999991291336,
+        835.3999991289207,
+        -296.5428641172392
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 806,
+      "frame_id": 6521
+    },
+    {
+      "center": [
+        357.54500274807214,
+        829.1150070205331,
+        -296.93500213474033
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 912,
+      "frame_id": 7411
+    },
+    {
+      "center": [
+        357.679998780787,
+        830.5899993911386,
+        -294.86000060886147
+      ],
+      "radius_m": 1.0,
+      "reason": "all_nbv_rays_collide",
+      "iteration": 912,
+      "frame_id": 7411
+    },
+    {
+      "center": [
+        358.00857456901247,
+        831.145712717729,
+        -296.30285993154564
+      ],
+      "radius_m": 1.0,
+      "reason": "all_nbv_rays_collide",
+      "iteration": 983,
+      "frame_id": 8031
+    },
+    {
+      "center": [
+        358.7555616605613,
+        830.1333387601707,
+        -297.57777845445605
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 983,
+      "frame_id": 8031
+    },
+    {
+      "center": [
+        357.9506697606047,
+        829.6746712254484,
+        -296.5680041489005
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1105,
+      "frame_id": 9049
+    },
+    {
+      "center": [
+        357.80001220852137,
+        834.5666646336515,
+        -297.09333292494216
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1119,
+      "frame_id": 9189
+    },
+    {
+      "center": [
+        356.8500030532479,
+        828.6699920669198,
+        -296.97000427097083
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1120,
+      "frame_id": 9202
+    },
+    {
+      "center": [
+        356.6333302830656,
+        830.2166636163989,
+        -297.7666585271557
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1159,
+      "frame_id": 9549
+    },
+    {
+      "center": [
+        359.9553875277822,
+        825.2753882789841,
+        -297.32922644832956
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1258,
+      "frame_id": 10370
+    },
+    {
+      "center": [
+        359.11333414862554,
+        828.2755493178963,
+        -298.45110405666964
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1374,
+      "frame_id": 11404
+    },
+    {
+      "center": [
+        357.14999923855066,
+        830.9375053420663,
+        -296.97499694675207
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1377,
+      "frame_id": 11447
+    },
+    {
+      "center": [
+        358.2925941764757,
+        813.488895672063,
+        -298.7962933560764
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1850,
+      "frame_id": 15117
+    }
+  ]
+}
