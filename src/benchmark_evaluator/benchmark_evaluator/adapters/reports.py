@@ -4,18 +4,22 @@ from pathlib import Path
 from ..plot_adapter import generate_results_plot
 from auv_contracts.mission_results import MISSION_STATS_FILENAME, distance_record
 from .response_reports import write_motion_response
+from .permanent_bans import PermanentBanRecorder
 
 class FileReportWriter:
     def __init__(self, results_dir, diagnostics):
         self.results_dir = results_dir
         self.results_path = Path(results_dir).expanduser()
         self.diagnostics = diagnostics
+        self.permanent_bans = PermanentBanRecorder(self.results_path)
 
     def write(self, snapshot, total_time):
 
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_path = self.results_path
         results_path.mkdir(parents=True, exist_ok=True)
+        self.permanent_bans.poll()
+        self.permanent_bans.save_snapshot(results_path / f'permanent_ban_spheres_{timestamp_str}.json')
         write_motion_response(results_path, snapshot, self.diagnostics)
         csv_filename = results_path / f"trajectory_benchmark_{timestamp_str}.csv"
         # txt_filename = f"mission_stats_{timestamp_str}.txt"

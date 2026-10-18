@@ -47,6 +47,7 @@ struct Candidate {
   V3 position, target;
   double utility = 0, raw_gain = 0, raw_cost = 0;
   int cluster_id = -1;
+  bool raw_scores_available = false;
 };
 Json json(const Candidate &);
 std::vector<Candidate> candidates(const Json &);
@@ -54,9 +55,29 @@ struct SearchResult {
   Points path;
   std::string reason;
   int expansions = 0;
+  int directions_checked = 0, clear_directions = 0;
 };
 SearchResult astar(const V3 &, const V3 &, const Voxels &, double, int = 50000);
+SearchResult astar_view_standoff(const V3 &, const V3 &, const V3 &,
+                                 const Voxels &, const Voxels &, double,
+                                 const V3 &, double, double, int);
+struct ViewProbe {
+  Points goals;
+  int directions_checked = 0, clear_directions = 0;
+};
+ViewProbe probe_nbv_views(const V3 &, const V3 &, const Voxels &, const Voxels &,
+                          double, const V3 &, double, double);
+SearchResult astar_view_surround(const V3 &, const V3 &, const V3 &,
+                                const Voxels &, const Voxels &, double,
+                                const V3 &, double, double, int);
 Voxels inflate(const Voxels &, double, double);
+// Collision geometry uses whole occupied cells, not extracted point centers.
+Voxels inflate_clearance(const Voxels &, double, double);
+double obstacle_clearance(const V3 &, const Voxels &, double);
+bool clearance_free(const Points &, const Voxels &, double, double);
+bool retreat_safe(const Points &, const Voxels &, double, double);
+Points clearance_retreat(const V3 &, const Voxels &, const Voxels &, double,
+                         double, double);
 bool collision_free(const Points &, const Voxels &, double, double = 0.5);
 Trajectory reconnect(const Trajectory &, const V3 &, double, const Voxels &,
                      double, double = 0.5);
@@ -65,7 +86,9 @@ struct Route {
   std::string reason;
 };
 Route plan_route(const V3 &, const std::vector<Candidate> &, const Voxels &,
-                 double, int = 50000, V3 = V3::Zero(), double = 2.0);
+                 double, int = 50000, V3 = V3::Zero(), double = 2.0,
+                 const std::function<SearchResult(const V3 &, const Candidate &)> & = {},
+                 bool = false);
 Trajectory smooth(const Points &, const Points &, int = 200, double = 2.0,
                   double = 0.0);
 Trajectory resample(const Trajectory &, double, std::optional<int> = {});
@@ -110,6 +133,15 @@ struct Cluster {
   Points points, normals;
   std::vector<int> indices;
 };
+struct CachedCluster {
+  Cluster geometry;
+  std::vector<double> complexities;
+};
+// Per-mission geometry; distant clusters keep their last local observation.
+struct NBVCache {
+  std::vector<CachedCluster> clusters;
+  int next_cluster_id = 0;
+};
 using Timing = std::function<void(const std::string &, double)>;
 using Diagnostic =
     std::function<void(const std::string &, const std::string &)>;
@@ -130,5 +162,6 @@ double seabed_weight(double, std::optional<double>, double = 0.5,
                      double = 0.95);
 std::vector<Candidate> nbv(const Points &, const V3 &, const V3 &,
                            const std::vector<std::pair<V3, double>> & = {},
-                           Json = Json::object(), Timing = {}, Diagnostic = {});
+                           Json = Json::object(), Timing = {}, Diagnostic = {},
+                           NBVCache * = nullptr);
 } // namespace inspection::migration

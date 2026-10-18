@@ -19,6 +19,7 @@
   <exec_depend>perception</exec_depend>
   <exec_depend>motion_control</exec_depend>
   <exec_depend>python_planner</exec_depend>
+  <exec_depend>active_inspection_planner</exec_depend>
   <exec_depend>benchmark_evaluator</exec_depend>
 
   <export>

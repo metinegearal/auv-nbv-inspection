@@ -1,0 +1,17 @@
+{
+  "source": "inspection_planner_node_150671_1792150190212.log, 2026-10-16 14:29-15:07 Europe/Istanbul",
+  "published_routes": 168,
+  "failed_goal_checks": 649,
+  "stalled_routes": 7,
+  "extended_observation": {
+    "iteration": 2672,
+    "target": [356.30000348921334, 832.0857177749276, -296.51429268824205],
+    "vehicle_goal": [355.5749472848314, 829.846565542906, -293.1708149046151]
+  },
+  "repeated_region": [
+    [358.476924956418, 826.2769268344229, -297.569227011731],
+    [358.591668702662, 826.1833333348235, -297.7083318059643],
+    [358.5, 826.2, -297.6]
+  ],
+  "note": "Frozen spatial inputs for sequential lifecycle regressions. Tests provide controlled occupancy and motion; these are not historical full-map snapshots."
+}

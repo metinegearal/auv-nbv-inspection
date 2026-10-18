@@ -483,7 +483,7 @@ int Seabed::update(const Points &p) {
 std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
                            const std::vector<std::pair<V3, double>> &history,
                            Json supplied, Timing timing,
-                           Diagnostic diagnostic) {
+                           Diagnostic diagnostic, NBVCache *cache) {
   auto log = [&](const std::string &s) {
     if (diagnostic)
       diagnostic("info", s);
@@ -491,8 +491,11 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
   log("Calculating NBV waypoints...");
   Json p = nbv_defaults();
   p.update(supplied);
-  if (raw.empty())
+  if (raw.empty()) {
+    if (cache)
+      cache->clusters.clear();
     return {};
+  }
   std::optional<double> floor;
   int floor_count = 0;
   if (p["seabed_enabled"].get<bool>()) {
@@ -523,15 +526,19 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
   log("NBV target mask: " + std::to_string(raw.size()) +
       " occupied points -> " + std::to_string(filtered.size()) +
       " above z_min_target=" + std::to_string(zmin));
-  if (filtered.empty())
+  if (filtered.empty()) {
+    if (cache)
+      cache->clusters.clear();
     return {};
+  }
   auto prepared = prepare_cloud(filtered, pos, p, timing);
   if (!prepared) {
     log("NBV preprocessing left no usable surface from " +
         std::to_string(filtered.size()) + " points");
-    return {};
+    if (!cache)
+      return {};
   }
-  auto &cloud = *prepared;
+  Cloud cloud = prepared ? std::move(*prepared) : Cloud{};
   double radius = p["exploration_radius"];
   if (!std::isfinite(radius) || radius <= 0)
     throw std::invalid_argument(
@@ -543,9 +550,9 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
   log("Focus Window: Processing " + std::to_string(focus.size()) + "/" +
       std::to_string(cloud.points.size()) + " points within " +
       std::to_string(radius) + "m");
-  if (focus.empty())
+  if (focus.empty() && !cache)
     return {};
-  Tree occupied(raw), cleaned(cloud.points);
+  Tree occupied(raw), cleaned(cloud.points.empty() ? filtered : cloud.points);
   auto fs = timed("nbv_frontier_detection", timing, [&] {
     return frontiers(cloud, p["frontier_neighbors"],
                      p["frontier_angle_threshold_deg"], p["frontier_radius"],
@@ -567,16 +574,58 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
       " surface points -> " + std::to_string(fs.size()) + " frontiers -> " +
       std::to_string(count) + " clustered points in " +
       std::to_string(clusters.size()) + " clusters");
-  if (clusters.empty())
+  if (clusters.empty() && !cache)
     return {};
   std::vector<int> indices(unique.begin(), unique.end());
   auto complexity = timed("nbv_pca", timing, [&] {
     return pca(cloud.points, p["pca_neighbors"], &indices);
   });
+  std::vector<CachedCluster> refreshed;
+  for (auto &c : clusters) {
+    std::vector<double> values;
+    for (int index : c.indices)
+      values.push_back(complexity[index]);
+    if (cache)
+      c.id = cache->next_cluster_id++;
+    refreshed.push_back({std::move(c), std::move(values)});
+  }
+  if (cache) {
+    std::vector<CachedCluster> retained;
+    int updated = 0, removed = 0;
+    double support_radius = std::max(.2, p["voxel_downsample_size"].get<double>());
+    for (auto &entry : cache->clusters) {
+      // Replace entries touched by the local refresh, including vanished frontiers.
+      bool local = std::any_of(
+          entry.geometry.points.begin(), entry.geometry.points.end(),
+          [&](const V3 &v) { return (v - pos).norm() <= radius; });
+      if (local) {
+        ++updated;
+        continue;
+      }
+      bool supported = std::any_of(
+          entry.geometry.points.begin(), entry.geometry.points.end(),
+          [&](const V3 &v) {
+            return v.z() > zmin && occupied.nearest(v) <= support_radius;
+          });
+      if (supported)
+        retained.push_back(std::move(entry));
+      else
+        ++removed;
+    }
+    log("NBV cluster cache: " + std::to_string(refreshed.size()) +
+        " refreshed, " + std::to_string(retained.size()) +
+        " distant retained, " + std::to_string(updated) +
+        " local replaced, " + std::to_string(removed) + " unsupported removed");
+    for (auto &entry : refreshed)
+      retained.push_back(std::move(entry));
+    cache->clusters = std::move(retained);
+  }
+  const auto &global_clusters = cache ? cache->clusters : refreshed;
   double started = monotonic();
   std::vector<Candidate> all;
   int visited = 0, generated = 0, rejected = 0;
-  for (auto &c : clusters) {
+  for (auto &entry : global_clusters) {
+    const auto &c = entry.geometry;
     bool seen = false;
     for (auto &[hpos, hyaw] : history) {
       V3 delta = c.centroid - hpos;
@@ -623,7 +672,7 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
         double incidence =
             std::clamp((-ray / distance).dot(c.normals[i]), 0., 1.);
         double weight =
-            1 + p["complexity_weight"].get<double>() * complexity[c.indices[i]];
+            1 + p["complexity_weight"].get<double>() * entry.complexities[i];
         gain += incidence * weight *
                 seabed_weight(c.points[i].z(), floor, p["seabed_decay_height"],
                               p["seabed_penalty_strength"]);
@@ -647,11 +696,11 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
       double cost = p["distance_weight"].get<double>() * d +
                     p["rotation_weight"].get<double>() * (turn1 + turn2) +
                     p["collision_weight"].get<double>() * risk;
-      all.push_back({vp, c.centroid, 0, gain, cost, c.id});
+      all.push_back({vp, c.centroid, 0, gain, cost, c.id, true});
     }
   }
   log("NBV candidate filtering: " + std::to_string(visited) + "/" +
-      std::to_string(clusters.size()) +
+      std::to_string(global_clusters.size()) +
       " clusters suppressed by pose history; " + std::to_string(generated) +
       " viewpoints generated, " + std::to_string(rejected) +
       " below minimum raw gain, " + std::to_string(all.size()) + " retained");
@@ -659,6 +708,10 @@ std::vector<Candidate> nbv(const Points &raw, const V3 &pos, const V3 &heading,
     timing("nbv_candidate_evaluation", (monotonic() - started) * 1000);
   if (all.empty())
     return {};
+  // Runtime mission eligibility must be applied before extrema, utility and
+  // the per-cluster shortlist. Keep the legacy stateless reference unchanged.
+  if (p.value("defer_utility_normalization", false))
+    return all;
   double ming = INFINITY, maxg = -INFINITY, minc = INFINITY, maxc = -INFINITY;
   for (auto &c : all) {
     ming = std::min(ming, c.raw_gain);

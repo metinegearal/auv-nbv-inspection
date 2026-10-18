@@ -9,7 +9,8 @@ bench = json.loads((evidence / 'benchmark.json').read_text())
 pipeline = json.loads((evidence / 'pipeline_benchmark.json').read_text())
 numeric = json.loads((evidence / 'numerical_errors.json').read_text())
 lines = ['# Migration validation results', '',
-         'Validated on 2026-10-13. Runtime source edits are confined to `active_inspection_planner`.', '',
+         'Initial runtime validation: 2026-10-13. Planner runtime belongs to `active_inspection_planner`; launch composition and operational configuration belong to `bringup`.', '',
+         'Launch ownership update (2026-10-14): both `bringup` launches were rebuilt and checked through the installed launch CLI. Eight composition tests passed, covering default C++, explicit C++/Python selection, invalid selection, single-planner composition, and main-file parameter precedence. See `migration_evidence/bringup_launch_tests.txt`.', '',
          '## Build and correctness', '',
          '* Isolated Release colcon build/install: passed.',
          '* Differential tests: **177 passed** (current Python source versus C++).',

@@ -12,6 +12,9 @@ waypoint_control_node:
     kp_dist: 0.75
     dvl_active: true
     stopping_distance: 0.4
+    # initial_waypoint_x: -14.0
+    # initial_waypoint_y: -82.0
+    # initial_waypoint_z: -29.5
     initial_waypoint_x: 354.0
     initial_waypoint_y: 828.0
     initial_waypoint_z: -298.0
@@ -27,6 +30,9 @@ point_iterator:
     camera_x: 0.35
     camera_y: 0.3875
     camera_z: -0.5
+    # initial_waypoint_x: -14.0
+    # initial_waypoint_y: -82.0
+    # initial_waypoint_z: -29.5
     initial_waypoint_x: 354.0
     initial_waypoint_y: 828.0
     initial_waypoint_z: -298.0
@@ -76,6 +82,10 @@ planner_node:
     astar_max_steps: 50000
     # Skip an actually failed target briefly, then allow another attempt.
     route_blacklist_cooldown_s: 30.0
+    # Spatial radius for temporary bans, retry accounting, and exhausted retry regions (m).
+    route_blacklist_radius_m: 0.5
+    # Permanent exclusion radius after all sampled NBV rays are blocked (m).
+    route_collision_blacklist_radius_m: 1.0
     spline_smoothing: 2.0
     collision_check_spacing_factor: 0.5
     arrival_target_radius: 1.5

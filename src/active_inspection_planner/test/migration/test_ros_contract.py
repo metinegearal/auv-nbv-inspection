@@ -1,6 +1,5 @@
 """Exercise real ROS discovery, parameter defaults, QoS, and mission completion."""
 import os
-import pathlib
 import signal
 import subprocess
 import sys
@@ -101,21 +100,3 @@ def test_ros_topics_qos_and_completion(implementation, profile, tmp_path):
                 process.wait()
         assert (tmp_path / 'map.bt').exists()
         assert len((tmp_path / 'evaluation_parameters.txt').read_text().splitlines()) == 3
-
-
-def test_selectable_launch_uses_existing_bringup():
-    import importlib.util
-    from launch import LaunchContext
-    from launch_ros.actions import Node
-    path = pathlib.Path(__file__).resolve().parents[2] / 'launch/mapper.launch.py'
-    spec = importlib.util.spec_from_file_location('migrated_mapper', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    for implementation in ('python', 'cpp'):
-        context = LaunchContext()
-        context.launch_configurations['planner_implementation'] = implementation
-        actions = module._setup(context)
-        nodes = [a for a in actions if isinstance(a, Node)]
-        package = 'active_inspection_planner' if implementation == 'cpp' else 'python_planner'
-        assert sum(n.node_package == package for n in nodes) == 1
-        assert {n.node_package for n in nodes} == {package, 'sim_bridge', 'motion_control', 'perception', 'benchmark_evaluator'}

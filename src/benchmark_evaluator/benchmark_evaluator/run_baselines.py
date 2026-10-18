@@ -20,9 +20,11 @@ class BenchmarkLogger(Node):
             'max_samples': self.declare_parameter('response_max_samples', 3000).value,
             'log_period_s': self.declare_parameter('response_log_period_s', 1.0).value,
         }
+        reports = FileReportWriter(results_dir, self.get_logger())
+        self.permanent_bans = reports.permanent_bans
         self.evaluation = TrajectoryEvaluation(
             MidrunLogger(results_dir, trajectory_only=True),
-            FileReportWriter(results_dir, self.get_logger()), time, self.get_logger(), show,
+            reports, time, self.get_logger(), show,
             response_options)
         self.odom_sub = self.create_subscription(Odometry, 'holocean/odom', self.odom_callback, 10)
         self.planned_trajectory_sub = self.create_subscription(
@@ -32,6 +34,12 @@ class BenchmarkLogger(Node):
         self.waypoint_sub = self.create_subscription(
             Float32MultiArray, '/trajectory/waypoint', self.waypoint_callback, 10)
         self.timer = self.create_timer(0.5, self.evaluation.log_trajectory_callback)
+        self.ban_timer = self.create_timer(1.0, self.save_permanent_bans)
+    def save_permanent_bans(self):
+        try:
+            self.permanent_bans.poll()
+        except OSError as error:
+            self.get_logger().warning(f'Could not save permanent ban spheres: {error}')
     def odom_callback(self, msg):
         p, q, t = msg.pose.pose.position, msg.pose.pose.orientation, msg.header.stamp
         self.evaluation.odom_callback(PoseSample(
@@ -43,6 +51,7 @@ class BenchmarkLogger(Node):
     def waypoint_callback(self, msg):
         self.evaluation.motion_response.waypoint_callback(ArrayEvent(tuple(msg.data)))
     def destroy_node(self):
+        self.save_permanent_bans()
         self.evaluation.close()
         return super().destroy_node()
 
