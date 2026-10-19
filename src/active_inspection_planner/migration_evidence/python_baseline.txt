@@ -1,0 +1,221 @@
+.............FFF....................F................................... [ 37%]
+............................................................F..FF.F..... [ 74%]
+.....FFFFFFFFFFFFFFFF.F.FFFFFFFFFFF..............                        [100%]
+=================================== FAILURES ===================================
+_____ test_stationary_and_short_routes_publish_without_cubic_spline[goal0] _____
+src/python_planner/test/test_mission_trajectory_recovery.py:59: in test_stationary_and_short_routes_publish_without_cubic_spline
+    assert any(call.args[0] == 'trajectory_option' and
+E   assert False
+E    +  where False = any(<generator object test_stationary_and_short_routes_publish_without_cubic_spline.<locals>.<genexpr> at 0x77ddf9120520>)
+_____ test_stationary_and_short_routes_publish_without_cubic_spline[goal1] _____
+src/python_planner/test/test_mission_trajectory_recovery.py:59: in test_stationary_and_short_routes_publish_without_cubic_spline
+    assert any(call.args[0] == 'trajectory_option' and
+E   assert False
+E    +  where False = any(<generator object test_stationary_and_short_routes_publish_without_cubic_spline.<locals>.<genexpr> at 0x77dd51fda8e0>)
+_____ test_stationary_and_short_routes_publish_without_cubic_spline[goal2] _____
+src/python_planner/test/test_mission_trajectory_recovery.py:59: in test_stationary_and_short_routes_publish_without_cubic_spline
+    assert any(call.args[0] == 'trajectory_option' and
+E   assert False
+E    +  where False = any(<generator object test_stationary_and_short_routes_publish_without_cubic_spline.<locals>.<genexpr> at 0x77dd51bf42b0>)
+____ test_candidate_order_prefers_forward_motion_but_allows_required_return ____
+src/python_planner/test/test_motion_continuity.py:31: in test_candidate_order_prefers_forward_motion_but_allows_required_return
+    route, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+__________________ test_sparse_fallback_matches_dense_result ___________________
+src/python_planner/test/test_obstacle_inflation.py:39: in test_sparse_fallback_matches_dense_result
+    monkeypatch.setattr(routes, '_MAX_INFLATION_GRID_CELLS', 1)
+E   AttributeError: <module 'python_planner.route_planning' from '/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/src/python_planner/python_planner/route_planning.py'> has no attribute '_MAX_INFLATION_GRID_CELLS'
+____________ test_invalid_inflation_settings_are_rejected[-1.0-0.2] ____________
+src/python_planner/test/test_obstacle_inflation.py:58: in test_invalid_inflation_settings_are_rejected
+    with pytest.raises(ValueError):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+____________ test_invalid_inflation_settings_are_rejected[0.9-0.0] _____________
+src/python_planner/test/test_obstacle_inflation.py:59: in test_invalid_inflation_settings_are_rejected
+    routes.inflate_occupied({(0, 0, 0)}, radius, resolution)
+src/python_planner/python_planner/route_planning.py:68: in inflate_occupied
+    radius_voxels = int(np.ceil(collision_radius / resolution))
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ZeroDivisionError: float division by zero
+____________ test_invalid_inflation_settings_are_rejected[0.9-inf] _____________
+src/python_planner/test/test_obstacle_inflation.py:58: in test_invalid_inflation_settings_are_rejected
+    with pytest.raises(ValueError):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[0] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 1.5, 1.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([1.5, 2.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[1] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 1.5, 1.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([0.5, 3.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[2] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([1.5, 2.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[3] _________
+src/python_planner/test/test_planning_performance_equivalence.py:139: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert path == []
+E   AssertionError: assert ([], 'no_connected_path') == []
+E     
+E     Left contains 2 more items, first extra item: []
+E     Use -v to get more diff
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[4] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([0.5, 3.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[5] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 1.5, 0.5]), array([0.5, 2.5, 0.5]), array([0.5, 3.5, 0.5]), array([0.5, 3.5, 1.5]), array([0.5, 4.5, 1.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[6] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([0.5, 3.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[7] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([0.5, 3.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[8] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([1.5, 1.5, 2.5]), array([1.5, 2.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[9] _________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([1.5, 1.5, 2.5]), array([1.5, 2.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[10] ________
+src/python_planner/test/test_planning_performance_equivalence.py:139: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert path == []
+E   AssertionError: assert ([], 'no_connected_path') == []
+E     
+E     Left contains 2 more items, first extra item: []
+E     Use -v to get more diff
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[11] ________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([1.5, 0.5, 2.5]), array([2.5, 0.5, 2.5]), array([3.5, 0.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[12] ________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 1.5, 1.5]), array([1.5, 1.5, 1.5]), array([1.5, 1.5, 2.5]), array([1.5, 2.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[13] ________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 1.5, 2.5]), array([0.5, 2.5, 2.5]), array([0.5, 3.5, 2.5]), ...], 'success'))
+________ test_astar_matches_exhaustive_shortest_path_with_obstacles[14] ________
+src/python_planner/test/test_planning_performance_equivalence.py:141: in test_astar_matches_exhaustive_shortest_path_with_obstacles
+    assert len(path) - 1 == distance
+E   AssertionError: assert (2 - 1) == 12
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([1.5, 0.5, 2.5]), array([2.5, 0.5, 2.5]), array([3.5, 0.5, 2.5]), ...], 'success'))
+______ test_goal_directed_ties_avoid_expanding_an_open_equal_cost_volume _______
+src/python_planner/test/test_planning_performance_equivalence.py:150: in test_goal_directed_ties_avoid_expanding_an_open_equal_cost_volume
+    assert len(path) == 231
+E   AssertionError: assert 2 == 231
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([0.5, 0.5, 1.5]), array([0.5, 0.5, 2.5]), array([0.5, 0.5, 3.5]), array([0.5, 0.5, 4.5]), array([0.5, 0.5, 5.5]), ...], 'success'))
+________________ test_astar_preserves_detours_around_obstacles _________________
+src/python_planner/test/test_route_search_limits.py:44: in test_astar_preserves_detours_around_obstacles
+    assert len(path) == 6  # Three horizontal and two detour steps.
+    ^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert 2 == 6
+E    +  where 2 = len(([array([0.5, 0.5, 0.5]), array([ 0.5, -0.5,  0.5]), array([ 1.5, -0.5,  0.5]), array([ 2.5, -0.5,  0.5]), array([ 3.5, -0.5,  0.5]), array([3.5, 0.5, 0.5])], 'success'))
+__________ test_far_high_utility_view_precedes_near_low_utility_view ___________
+src/python_planner/test/test_route_utility_priority.py:21: in test_far_high_utility_view_precedes_near_low_utility_view
+    route, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+_______________ test_utility_priority_overrides_reversal_penalty _______________
+src/python_planner/test/test_route_utility_priority.py:29: in test_utility_priority_overrides_reversal_penalty
+    route, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+_______ test_equal_utilities_use_distance_from_each_successful_endpoint ________
+src/python_planner/test/test_route_utility_priority.py:38: in test_equal_utilities_use_distance_from_each_successful_endpoint
+    _, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+____________ test_equal_utilities_retain_forward_motion_preference _____________
+src/python_planner/test/test_route_utility_priority.py:45: in test_equal_utilities_retain_forward_motion_preference
+    _, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+_______ test_unreachable_high_utility_view_does_not_shift_later_ordering _______
+src/python_planner/test/test_route_utility_priority.py:54: in test_unreachable_high_utility_view_does_not_shift_later_ordering
+    route, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+_______________ test_all_blocked_returns_consistent_empty_arrays _______________
+src/python_planner/test/test_route_utility_priority.py:62: in test_all_blocked_returns_consistent_empty_arrays
+    route, targets = plan_multi_waypoint_route(
+    ^^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2)
+____________ test_invalid_utility_metadata_is_rejected[utilities0] _____________
+src/python_planner/test/test_route_utility_priority.py:70: in test_invalid_utility_metadata_is_rejected
+    with pytest.raises(ValueError, match='one finite value per candidate'):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+____________ test_invalid_utility_metadata_is_rejected[utilities1] _____________
+src/python_planner/test/test_route_utility_priority.py:70: in test_invalid_utility_metadata_is_rejected
+    with pytest.raises(ValueError, match='one finite value per candidate'):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+____________ test_invalid_utility_metadata_is_rejected[utilities2] _____________
+src/python_planner/test/test_route_utility_priority.py:70: in test_invalid_utility_metadata_is_rejected
+    with pytest.raises(ValueError, match='one finite value per candidate'):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+____________ test_invalid_utility_metadata_is_rejected[utilities3] _____________
+src/python_planner/test/test_route_utility_priority.py:70: in test_invalid_utility_metadata_is_rejected
+    with pytest.raises(ValueError, match='one finite value per candidate'):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+____________ test_invalid_utility_metadata_is_rejected[utilities4] _____________
+src/python_planner/test/test_route_utility_priority.py:70: in test_invalid_utility_metadata_is_rejected
+    with pytest.raises(ValueError, match='one finite value per candidate'):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+=========================== short test summary info ============================
+FAILED src/python_planner/test/test_mission_trajectory_recovery.py::test_stationary_and_short_routes_publish_without_cubic_spline[goal0]
+FAILED src/python_planner/test/test_mission_trajectory_recovery.py::test_stationary_and_short_routes_publish_without_cubic_spline[goal1]
+FAILED src/python_planner/test/test_mission_trajectory_recovery.py::test_stationary_and_short_routes_publish_without_cubic_spline[goal2]
+FAILED src/python_planner/test/test_motion_continuity.py::test_candidate_order_prefers_forward_motion_but_allows_required_return
+FAILED src/python_planner/test/test_obstacle_inflation.py::test_sparse_fallback_matches_dense_result
+FAILED src/python_planner/test/test_obstacle_inflation.py::test_invalid_inflation_settings_are_rejected[-1.0-0.2]
+FAILED src/python_planner/test/test_obstacle_inflation.py::test_invalid_inflation_settings_are_rejected[0.9-0.0]
+FAILED src/python_planner/test/test_obstacle_inflation.py::test_invalid_inflation_settings_are_rejected[0.9-inf]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[0]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[1]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[2]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[3]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[4]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[5]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[6]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[7]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[8]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[9]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[10]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[11]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[12]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[13]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_astar_matches_exhaustive_shortest_path_with_obstacles[14]
+FAILED src/python_planner/test/test_planning_performance_equivalence.py::test_goal_directed_ties_avoid_expanding_an_open_equal_cost_volume
+FAILED src/python_planner/test/test_route_search_limits.py::test_astar_preserves_detours_around_obstacles
+FAILED src/python_planner/test/test_route_utility_priority.py::test_far_high_utility_view_precedes_near_low_utility_view
+FAILED src/python_planner/test/test_route_utility_priority.py::test_utility_priority_overrides_reversal_penalty
+FAILED src/python_planner/test/test_route_utility_priority.py::test_equal_utilities_use_distance_from_each_successful_endpoint
+FAILED src/python_planner/test/test_route_utility_priority.py::test_equal_utilities_retain_forward_motion_preference
+FAILED src/python_planner/test/test_route_utility_priority.py::test_unreachable_high_utility_view_does_not_shift_later_ordering
+FAILED src/python_planner/test/test_route_utility_priority.py::test_all_blocked_returns_consistent_empty_arrays
+FAILED src/python_planner/test/test_route_utility_priority.py::test_invalid_utility_metadata_is_rejected[utilities0]
+FAILED src/python_planner/test/test_route_utility_priority.py::test_invalid_utility_metadata_is_rejected[utilities1]
+FAILED src/python_planner/test/test_route_utility_priority.py::test_invalid_utility_metadata_is_rejected[utilities2]
+FAILED src/python_planner/test/test_route_utility_priority.py::test_invalid_utility_metadata_is_rejected[utilities3]
+FAILED src/python_planner/test/test_route_utility_priority.py::test_invalid_utility_metadata_is_rejected[utilities4]
+36 failed, 157 passed in 11.58s

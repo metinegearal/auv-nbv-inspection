@@ -1,0 +1,9 @@
+{
+  "sources": {
+    "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/final_map_ros2.bt": "54207685ae0ea1e88d032f649ce926192845cf91add224b7ab04a528dfcfafc2",
+    "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/planner_nbv_iterations.jsonl": "88aa9ea8a33499fd4b32570ef71d764b0fc2e907b7a8a17efb68eb57a9252dbf",
+    "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/planner_future_trajectories.csv": "1e27e4c76d10ac53346b22ea437c2f08c3d73c9d8724e9a8e0c2e47880d382e7",
+    "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/planner_depth_poses.csv": "55fd6f4203dbb88de2737c2be946a468e0ddcbb3e8103af62ecdc4e75529c5c1"
+  },
+  "limitation": "Repository contains map and planner output logs, but no raw depth frames or complete ROS mission bag. Pose replay reconstructs identity quaternion because the source log has Euler angles only; these fixtures are not a complete mission replay."
+}
