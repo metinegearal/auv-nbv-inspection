@@ -1,6 +1,6 @@
 # Bringup parameter reference
 
-`params.yaml` configures the launched nodes. `nbv_params.yaml` supplies the Python planner's geometric scoring profile. `holoocean_config.json` is passed to HoloOcean as a scenario, rather than parsed as ROS parameters. `holoocean_config copy.json` is an alternate local scenario; the launch file does not load it automatically.
+`params.yaml` configures the launched nodes. `nbv_params.yaml` supplies the selected planner's geometric scoring profile. `holoocean_config.json` is passed to HoloOcean as a scenario, rather than parsed as ROS parameters. `holoocean_config copy.json` is an alternate local scenario; the launch file does not load it automatically.
 
 The tables distinguish **configured values** in the checked-in YAML from **code defaults** used when a value is omitted. This document describes existing behavior; it does not change tuning or algorithms.
 
@@ -8,13 +8,16 @@ The tables distinguish **configured values** in the checked-in YAML from **code 
 
 ```bash
 ros2 launch bringup mapper.launch.py
+ros2 launch bringup mapper.launch.py planner_implementation:=python
+ros2 launch bringup planner.launch.py
 ros2 launch bringup mapper.launch.py params_file:=/absolute/path/params.yaml nbv_params_file:=/absolute/path/nbv.yaml holo_config_file:=/absolute/path/scenario.json
 ```
 
 | Launch argument | Default installed resource | Consumers |
 |---|---|---|
+| `planner_implementation` | `cpp` (`python` selects the reference) | Planner package and executable selection |
 | `params_file` | `bringup/config/params.yaml` | All six launched processes |
-| `nbv_params_file` | `bringup/config/nbv_params.yaml` | Python planner only |
+| `nbv_params_file` | `bringup/config/nbv_params.yaml` | Selected inspection planner |
 | `holo_config_file` | `bringup/config/holoocean_config.json` | Bridge's `holoocean_config_path` parameter |
 
 The planner receives `[nbv_params_file, params_file]`; the main file wins when both define the same key. The bridge receives the main file and then the explicit scenario-path override. YAML keys use **launch names**: `waypoint_control_node`, `point_iterator`, `planner_node`, `run_baselines`, `depth_estimation`, and `holoocean_node`. Standalone constructors have different names for the queue (`path_planner`), planner (`nbv_utility_node`), observer (`benchmark_logger`), and depth node (`object_detector_node`); supply matching node keys or remap the name when running an executable directly.
@@ -97,7 +100,9 @@ Source: [configuration loader](../../python_planner/python_planner/domain/config
 | `use_incremental_map_cache` | `true` | `true` | Maintains occupancy / inflation caches incrementally; false rebuilds the collision set. |
 | `nbv_filter_logging` | `true` | `true` | Emits candidate/filter details to diagnostics and JSONL telemetry. |
 | `astar_max_steps` | `50000` | `50000` | Per-search A* step bound. |
-| `route_blacklist_cooldown_s` | `30.0` | `30.0` | Temporary failed-target ban duration; nonpositive values disable target bans. |
+| `route_blacklist_cooldown_s` | `30.0` | `30.0` | Temporary failed-target ban duration; nonpositive values disable temporary cooldowns, while permanent bans remain. |
+| `route_blacklist_radius_m` | `0.5` | `0.5` | C++ planner: radius in metres for temporary bans, retry-region matching and exhausted retry exclusions; finite and positive, applied at startup. |
+| `route_collision_blacklist_radius_m` | `1.0` | `1.0` | C++ planner: permanent ban radius in metres when every sampled NBV ray collides; finite and positive, applied at startup. |
 | `spline_smoothing` | `2.0` | `2.0` | Spline smoothing factor passed to trajectory generation. |
 | `collision_check_spacing_factor` | `0.5` | `0.5` | Collision sample spacing relative to voxel resolution. |
 
@@ -110,7 +115,7 @@ Defaults: [domain/nbv_parameters.py](../../python_planner/python_planner/domain/
 | Parameter | Configured | Code default | Meaning / units |
 |---|---|---|---|
 | `nbv_z_min_target` | `-300.0` | `-3000.0` | Strict world-Z lower bound on occupied points entering NBV scoring. |
-| `nbv_exploration_radius` | `15.0` | `15.0` | Positive finite focus radius around the AUV in metres; full-cloud neighbors and obstacle context remain available. |
+| `nbv_exploration_radius` | `10.0` | `15.0` | Local frontier geometry refresh radius around the camera in metres. C++ retains previously discovered distant clusters for global scoring. |
 | `nbv_voxel_downsample_size` | `0.25` | `0.25` | Open3D downsample voxel size in metres. |
 | `nbv_outlier_neighbors` | `15` | `15` | Statistical outlier-filter neighbor count. |
 | `nbv_outlier_std_ratio` | `1.5` | `1.5` | Statistical outlier-filter standard-deviation ratio. |
@@ -130,13 +135,17 @@ Defaults: [domain/nbv_parameters.py](../../python_planner/python_planner/domain/
 | `nbv_visited_yaw_threshold_deg` | `40.0` | `30.0` | Bearing / historical-yaw match tolerance in degrees. |
 | `nbv_complexity_weight` | `30.0` | `15.0` | PCA-complexity contribution to incidence-weighted gain. `0` removes this contribution. |
 | `nbv_min_raw_gain` | `0.5` | `0.5` | Minimum raw information gain. |
-| `nbv_distance_weight` | `1.0` | `1.0` | Travel-distance contribution to kinematic cost. |
+| `nbv_distance_weight` | `3.0` | `1.0` | Travel-distance contribution to kinematic cost. |
 | `nbv_rotation_weight` | `0.5` | `0.5` | Required-turn contribution to kinematic cost. |
 | `nbv_collision_weight` | `2.0` | `2.0` | Nearby-obstacle penalty contribution. |
 | `nbv_collision_distance_threshold` | `0.8` | `0.8` | Distance below which the obstacle penalty applies; metres. |
 | `nbv_collision_distance_offset` | `0.2` | `0.1` | Denominator offset in the nearby-obstacle penalty; metres. |
+| `nbv_utility_gain_weight` | `1.5` | `1.0` | Overall normalized-gain contribution to utility. |
+| `nbv_utility_cost_weight` | `1.5` | `1.0` | Overall normalized-cost penalty in utility. |
 
-NBV preprocessing requires at least 40 retained points. Gains and costs are normalized across the candidate batch before computing `utility = normalized_gain - normalized_cost`. Changing one candidate's score can therefore change other candidates' normalized utilities. Unsupported parameters from reverted implementations are not read.
+NBV preprocessing requires at least 40 retained points. Gains and costs are normalized across the candidate batch before computing `utility = nbv_utility_gain_weight * normalized_gain - nbv_utility_cost_weight * normalized_cost`. The shipped profile balances gain and cost and gives distance more influence within cost, favoring shorter travel while retaining the complexity preference. Distance is straight-line distance to the viewpoint, not A* path length. Normalization means increasing distance weight alone does not proportionally increase its final penalty. Changing one candidate's score can therefore change other candidates' normalized utilities. Restart the planner to apply these startup parameters. Unsupported parameters from reverted implementations are not read.
+
+The C++ planner keeps a per-mission frontier cluster cache. Each planning pass replaces clusters touched by the local refresh window, including clusters no longer detected as frontiers. Distant clusters retain their surface points, normals, and complexity estimates; viewpoint gain, distance, turning, and obstacle costs are recomputed from the current pose and map before global normalization and ranking. Current pose history still suppresses previously observed targets. Entries with no remaining surface support in the current map are discarded, and route collision validation uses the current map. A newly started mission has an empty cache: distant regions become eligible after their clusters have first been discovered locally. The Python reference retains its original local-only candidate search.
 
 ## Perception and evaluation
 
@@ -173,6 +182,8 @@ The bridge forwards the JSON scenario to HoloOcean. The following are the checke
 
 Both cameras retain identical rendering settings: `TargetGamma=1.0`, `ExposureMethod=AEM_Histogram`, `ExposureCompensation=1`, `ShutterSpeed=60.0`, `ISO=800.0`, `Aperature=2.0` (the existing JSON spelling), `FocalDistance=100.0`, `DepthBlurAmount=1.2`, `DepthBlurRadius=1.0`, `BladeCount=6`, `DepthOfFieldMinFstop=1.4`, `WhiteTemp=4800.0`, `WhiteTint=0.25`, `BloomIntensity=1.8`, `LensFlareIntensity=1.0`, `ExposureSpeedDown=3.0`, and `ExposureSpeedUp=2.0`. These are simulator-owned rendering fields. `LocationSensor` has no explicit configuration block.
 
-## C++ planner alternative
+## Inspection planner selection
 
-`mapper.launch.py` launches the Python planner. The C++ `active_inspection_planner` executable is an alternative and is not started by that launch file. Its node is also called `nbv_utility_node` when run standalone. It declares `voxel_resolution=0.1`, `max_depth=5.0`, `min_depth=0.5`, `z_min_target=-32.0`, `info_gain_threshold=0.05`, `sparsity_multiplier=0.8`, and `min_utility_threshold=0.005`. These node defaults override the corresponding `MapperConfig` aggregate defaults. A YAML section named `planner_node` will not automatically configure this standalone node.
+`mapper.launch.py` defaults to `active_inspection_planner/inspection_planner_node`. Set `planner_implementation:=python` to run the preserved `python_planner/planner_node` reference. `planner.launch.py` runs the selected planner alone. Both launch files belong to `bringup`, name the node `planner_node`, and load `[nbv_params_file, params_file]` so the main file retains precedence. Runtime YAML belongs to `bringup/config`; the C++ planner package contains its runtime implementation and migration evidence, with no launch or operational configuration directory.
+
+The older C++ `nbv_utility_node` executable remains available separately and is not selected by these launches. Its historical defaults differ from the migrated planner.

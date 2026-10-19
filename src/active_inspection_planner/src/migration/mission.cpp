@@ -32,7 +32,23 @@ Json json_safe(Json j) {
 Mission::Mission(Json supplied, OccupancyMap &occupancy, MissionPorts p)
     : config(defaults()), seabed(supplied.value("voxel_resolution", .1)),
       map(occupancy), ports(std::move(p)) {
+  calculate = [this](const auto &raw, const auto &pos, const auto &heading,
+                     const auto &history, auto parameters, auto timing,
+                     auto diagnostic) {
+    return nbv(raw, pos, heading, history, std::move(parameters), timing,
+               diagnostic, &nbv_cache);
+  };
   config.update(supplied);
+  for (auto k : {"route_blacklist_radius_m", "route_collision_blacklist_radius_m"})
+    if (!config[k].is_number() || !(d(k) > 0 && std::isfinite(d(k))))
+      throw std::invalid_argument(std::string(k) + " must be finite and positive");
+  if (!(d("route_goal_max_extension_m") >= 0 &&
+        std::isfinite(d("route_goal_max_extension_m"))))
+    throw std::invalid_argument("route_goal_max_extension_m must be finite and nonnegative");
+  if (!config["route_target_max_attempts"].is_number_integer() ||
+      i("route_target_max_attempts") < 1 ||
+      !(d("route_target_timeout_s") > 0 && std::isfinite(d("route_target_timeout_s"))))
+    throw std::invalid_argument("target attempt limit and timeout must be positive");
   if (!config["route_max_candidates"].is_number_integer() ||
       i("route_max_candidates") < 1)
     throw std::invalid_argument(
@@ -218,6 +234,7 @@ Points Mission::depth_points(const DepthFrame &frame) {
   return local;
 }
 void Mission::accumulate() {
+  depth_has_observations = false;
   auto points_ = depth_points(*depth_frame);
   if (points_.empty()) {
     ports.diagnostics("warning", "Depth projection yielded 0 valid points (all "
@@ -251,6 +268,7 @@ void Mission::accumulate() {
   }
   filter("depth_point_cap", before, points_.size(), {{"limit", 4000}});
   map.insert(points_, sensor_origin, d("max_depth"));
+  depth_has_observations = true;
   ports.diagnostics("info", "Inserted " + std::to_string(points_.size()) +
                                 " points into OctoTree.");
   bool save = true;
@@ -264,7 +282,7 @@ void Mission::accumulate() {
   if (save)
     observation_history.emplace_back(latched_position, latched_yaw);
 }
-bool Mission::publish_trajectory(const Trajectory &t, const Voxels &occupied) {
+bool Mission::publish_trajectory(const Trajectory &t, const Voxels &occupied, bool omit_start) {
   if (t.empty())
     return false;
   Trajectory executed;
@@ -278,48 +296,147 @@ bool Mission::publish_trajectory(const Trajectory &t, const Voxels &occupied) {
     }
     executed.push_back(e);
   }
-  if (!collision_free(positions(executed), occupied, d("voxel_resolution"))) {
+  bool safe = recovering_clearance
+                  ? retreat_safe(positions(executed), recovery_obstacles,
+                                 d("voxel_resolution"), d("collision_radius"))
+                  : collision_free(positions(executed), occupied, d("voxel_resolution"));
+  if (!safe) {
     filter("vehicle_wire_validation", t.size(), 0,
            {{"reason", "executed_vehicle_route_collision"}});
     return false;
   }
+  // The first point is a validation anchor at the current pose. Sending it
+  // after a queue clear can leave the controller holding an already-reported
+  // waypoint instead of advancing to the actual destination.
+  if (omit_start && wire.size() > 4)
+    wire.erase(wire.begin(), wire.begin() + 4);
   ports.publish(wire);
   active_trajectory = executed;
   started_mapping = true;
-  ports.diagnostics("info", "Published " + std::to_string(executed.size()) +
+  ports.diagnostics("info", "Published " + std::to_string(wire.size() / 4) +
                                 " trajectory points");
   return true;
 }
 bool Mission::plan_and_publish(std::vector<Candidate> candidates_,
-                               const Voxels &occupied) {
+                               const Voxels &occupied, const Voxels *raw,
+                               std::vector<Candidate> *evaluated) {
   plan_failure.clear();
   failed_target.reset();
   std::vector<Candidate> valid;
-  for (auto &c : candidates_) {
-    bool accepted = c.utility >= d("min_utility_threshold");
-    if (accepted)
-      valid.push_back(c);
-    filter("candidate_minimum_utility", 1, int(accepted),
-           {{"cluster_id", c.cluster_id},
-            {"target", json(c.target)},
-            {"position", json(c.position)},
-            {"utility", c.utility},
-            {"threshold", d("min_utility_threshold")}});
-  }
-  filter("minimum_utility", candidates_.size(), valid.size(),
-         {{"threshold", d("min_utility_threshold")}});
-  if (valid.empty()) {
-    plan_failure = candidates_.empty() ? "no_candidates_to_plan"
-                                       : "minimum_utility_removed_all";
+  bool observed_rejected = false, budget_rejected = false, collision_rejected = false;
+  int normalization_pass = 0;
+  if (raw)
+    expire_blacklist();
+  auto prepare = [&]() {
+    std::vector<Candidate> eligible;
+    for (auto c : candidates_) {
+      if (raw) {
+        bool observed = target_observed(c.target), exhausted = false;
+        std::optional<V3> exhausted_center;
+        for (const auto &attempt : inspection_attempts)
+          if ((attempt.target - c.target).norm() < retry_radius() &&
+              attempt.count >= i("route_target_max_attempts") &&
+              (!inspection_goal || (inspection_goal->target - c.target).norm() >= retry_radius())) {
+            exhausted = true;
+            if (!exhausted_center)
+              exhausted_center = attempt.target;
+          }
+        bool banned = std::any_of(blacklisted_targets.begin(), blacklisted_targets.end(),
+            [&](const auto &t) { return (c.target - t).norm() <= blacklist_radius(t) + 1e-9; });
+        if (observed || exhausted || banned) {
+          observed_rejected |= observed;
+          budget_rejected |= exhausted;
+          collision_rejected |= banned;
+          Json suppression = {{"target", json(c.target)},
+                  {"reason", observed ? "observed_at_resolved_viewpoint"
+                             : exhausted ? "attempt_budget_exhausted"
+                             : collision_blacklisted(c.target) ? "collision_blacklist" : "blacklist"}};
+          if (!observed && exhausted_center) {
+            suppression["exclusion_center"] = json(*exhausted_center);
+            suppression["radius"] = retry_radius();
+          }
+          filter("inspection_target_suppressed", 1, 0, suppression);
+          continue;
+        }
+        if (c.raw_scores_available &&
+            (!std::isfinite(c.raw_gain) || !std::isfinite(c.raw_cost))) {
+          filter("candidate_score_validity", 1, 0,
+                 {{"target", json(c.target)}, {"reason", "nonfinite_raw_score"}});
+          continue;
+        }
+      }
+      eligible.push_back(c);
+    }
+    if (raw) {
+      double ming = INFINITY, maxg = -INFINITY, minc = INFINITY, maxc = -INFINITY;
+      int count = 0;
+      for (const auto &c : eligible)
+        if (c.raw_scores_available) {
+          ming = std::min(ming, c.raw_gain);
+          maxg = std::max(maxg, c.raw_gain);
+          minc = std::min(minc, c.raw_cost);
+          maxc = std::max(maxc, c.raw_cost);
+          ++count;
+        }
+      for (auto &c : eligible)
+        if (c.raw_scores_available) {
+          // A positive equal-gain pool (including one remaining view) still
+          // contains information. Equal costs carry no relative cost penalty.
+          double ng = maxg - ming < 1e-6 ? double(c.raw_gain > 0)
+                                        : (c.raw_gain - ming) / (maxg - ming);
+          double nc = maxc - minc < 1e-6 ? 0 : (c.raw_cost - minc) / (maxc - minc);
+          c.utility = nbv_parameters["utility_gain_weight"].get<double>() * ng -
+                      nbv_parameters["utility_cost_weight"].get<double>() * nc;
+        }
+      if (std::any_of(candidates_.begin(), candidates_.end(),
+                      [](const auto &c) { return c.raw_scores_available; }))
+        filter("utility_normalization", candidates_.size(), eligible.size(),
+             {{"pass", normalization_pass++}, {"raw_candidates", count},
+              {"gain_min", count ? Json(ming) : Json(nullptr)},
+              {"gain_max", count ? Json(maxg) : Json(nullptr)},
+              {"cost_min", count ? Json(minc) : Json(nullptr)},
+              {"cost_max", count ? Json(maxc) : Json(nullptr)},
+              {"threshold", d("min_utility_threshold")}});
+    }
+    if (raw)
+      std::stable_sort(eligible.begin(), eligible.end(),
+                       [](const auto &a, const auto &b) { return a.utility > b.utility; });
+    std::map<int, int> per_cluster;
+    std::vector<Candidate> shortlist;
+    for (const auto &c : eligible) {
+      if (raw && c.raw_scores_available && c.cluster_id >= 0 && ++per_cluster[c.cluster_id] > 3)
+        continue;
+      shortlist.push_back(c);
+    }
+    if (evaluated)
+      *evaluated = shortlist;
+    valid.clear();
+    for (const auto &c : shortlist) {
+      bool accepted = c.utility >= d("min_utility_threshold");
+      if (accepted)
+        valid.push_back(c);
+      filter("candidate_minimum_utility", 1, int(accepted),
+             {{"cluster_id", c.cluster_id}, {"target", json(c.target)},
+              {"position", json(c.position)}, {"utility", c.utility},
+              {"threshold", d("min_utility_threshold")}});
+    }
+    filter("minimum_utility", shortlist.size(), valid.size(),
+           {{"threshold", d("min_utility_threshold")}});
+    if (valid.empty()) {
+      plan_failure = budget_rejected ? "target_attempts_exhausted"
+                     : collision_rejected ? "collision_blacklist_removed_all"
+                     : observed_rejected ? "targets_already_observed"
+                     : candidates_.empty() ? "no_candidates_to_plan"
+                                         : "minimum_utility_removed_all";
+      return false;
+    }
+    if (!raw)
+      std::stable_sort(valid.begin(), valid.end(),
+                       [](const auto &a, const auto &b) { return a.utility > b.utility; });
+    return true;
+  };
+  if (!prepare())
     return false;
-  }
-  std::stable_sort(valid.begin(), valid.end(),
-                   [](auto &a, auto &b) { return a.utility > b.utility; });
-  if (int(valid.size()) > i("route_max_candidates"))
-    valid.resize(i("route_max_candidates"));
-  auto route_candidates = valid;
-  for (auto &c : route_candidates)
-    c.position = vehicle_viewpoint(c.position, c.target, camera_offset);
   double start = ports.clock();
   auto state = motion_snapshot();
   V3 vel = velocity(state.history, d("velocity_history_window"));
@@ -338,10 +455,88 @@ bool Mission::plan_and_publish(std::vector<Candidate> candidates_,
   bool optimize_ = b("trajectory_optimization_enabled");
   double resolution = d("voxel_resolution"),
          factor = d("collision_check_spacing_factor");
-  auto route =
-      plan_route(state.position, route_candidates, occupied, resolution,
+  std::function<SearchResult(const V3 &, const Candidate &)> goal_fallback;
+  std::vector<std::pair<V3, bool>> checked_targets;
+  std::vector<Candidate> searched_views;
+  int checks_remaining = i("route_max_candidates");
+  if (raw) {
+    goal_fallback = [&](const V3 &from, const Candidate &candidate) {
+      // A preceding candidate can blacklist this region during the same pass.
+      if (collision_blacklisted(candidate.target))
+        return SearchResult{{}, "collision_blacklist_removed_all", 0};
+      searched_views.push_back(candidate);
+      --checks_remaining;
+      auto result = astar_view_surround(
+          from, candidate.position, candidate.target, occupied, *raw, resolution,
+          camera_offset, d("max_depth"), d("route_goal_max_extension_m"),
+          i("astar_max_steps"));
+      if (result.directions_checked) {
+        filter("nbv_collision_rays", result.directions_checked, result.clear_directions,
+               {{"target", json(candidate.target)},
+                {"directions_checked", result.directions_checked},
+                {"clear_directions", result.clear_directions},
+                {"reason", result.reason}, {"blacklist_radius_m", d("route_collision_blacklist_radius_m")}});
+        if (result.reason == "all_nbv_rays_collide") {
+          blacklist_collision_target(candidate.target);
+          // A route can remain physically clear while every camera view of
+          // its target becomes occluded. Do not keep executing that old route.
+          if (inspection_goal && collision_blacklisted(inspection_goal->target)) {
+            active_failure = "inspection_target_all_rays_blocked";
+            cancel();
+          }
+        }
+      }
+      auto checked = std::find_if(checked_targets.begin(), checked_targets.end(),
+          [&](const auto &entry) { return (entry.first - candidate.target).norm() < retry_radius(); });
+      if (checked == checked_targets.end())
+        checked_targets.emplace_back(candidate.target, !result.path.empty());
+      else
+        checked->second |= !result.path.empty();
+      if (result.reason != "success")
+        filter("nbv_goal_standoff", 1, result.path.empty() ? 0 : 1,
+             {{"target", json(candidate.target)},
+              {"original_vehicle_goal", json(candidate.position)},
+              {"resolved_vehicle_goal", result.path.empty() ? Json(nullptr) : json(result.path.back())},
+              {"max_extension_m", d("route_goal_max_extension_m")},
+              {"reason", result.reason}, {"search_expansions", result.expansions}});
+      if (result.reason == "all_nbv_rays_collide")
+        return SearchResult{{}, "candidate_pool_changed", result.expansions};
+      return result;
+    };
+  }
+  Route route;
+  while (true) {
+    auto route_candidates = valid;
+    route_candidates.erase(std::remove_if(route_candidates.begin(), route_candidates.end(),
+        [&](const auto &c) {
+          V3 goal = vehicle_viewpoint(c.position, c.target, camera_offset);
+          return std::any_of(searched_views.begin(), searched_views.end(), [&](const auto &v) {
+            return (c.target - v.target).norm() < 1e-8 && (goal - v.position).norm() < 1e-8;
+          });
+        }), route_candidates.end());
+    if (int(route_candidates.size()) > checks_remaining)
+      route_candidates.resize(checks_remaining);
+    if (route_candidates.empty()) {
+      route.reason = "candidate_search_budget_exhausted";
+      break;
+    }
+    for (auto &c : route_candidates)
+      c.position = vehicle_viewpoint(c.position, c.target, camera_offset);
+    route = plan_route(state.position, route_candidates, occupied, resolution,
                  i("astar_max_steps"), optimize_ ? vel : V3::Zero(),
-                 optimize_ ? weights().reversal : 0);
+                 optimize_ ? weights().reversal : 0, goal_fallback, raw != nullptr);
+    if (!raw || route.reason != "candidate_pool_changed")
+      break;
+    // A new blacklist changes both extrema and candidate ranks. Rebuild from
+    // the full raw pool, including views previously outside the top three.
+    if (!prepare()) {
+      route.reason = plan_failure;
+      break;
+    }
+  }
+  for (const auto &[target, succeeded] : checked_targets)
+    if (!succeeded && (!inspection_goal || (inspection_goal->target - target).norm() >= retry_radius()))
+      record_inspection_attempt(target, "inspection_plan_failed");
   stage("route_search", start);
   bool safe = !route.path.empty() &&
               collision_free(route.path, occupied, resolution, factor);
@@ -358,7 +553,10 @@ bool Mission::plan_and_publish(std::vector<Candidate> candidates_,
     plan_failure = route.path.empty() ? route.reason : "route_collision";
     if (plan_failure == "start_occupied")
       force_replan = true;
-    else
+    else if (raw) {
+      if (!checked_targets.empty())
+        failed_target = checked_targets.front().first;
+    } else
       failed_target = valid[0].target;
     ports.diagnostics("warning", "A* route failed. Reason: " + plan_failure);
     return false;
@@ -468,11 +666,18 @@ bool Mission::plan_and_publish(std::vector<Candidate> candidates_,
     ports.diagnostics("warning", "Vehicle moved during planning; no safe entry "
                                  "to the new route. Requesting a fresh plan.");
   }
-  bool success = publish_trajectory(t, occupied);
+  bool success = publish_trajectory(t, occupied, raw != nullptr);
   stage("trajectory_publish", start, false, success ? "published" : "rejected");
-  if (success)
+  if (success) {
     selected_targets = targets;
-  else if (plan_failure.empty()) {
+    if (raw) {
+      V3 target = targets.back();
+      if (!inspection_goal || (inspection_goal->target - target).norm() >= retry_radius()) {
+        record_inspection_attempt(target, "inspection_attempt_started");
+      }
+      inspection_goal = InspectionGoal{active_trajectory.back().head<3>(), target};
+    }
+  } else if (plan_failure.empty()) {
     plan_failure = "trajectory_publish_rejected";
     failed_target = targets[0];
   }
@@ -483,35 +688,50 @@ void Mission::expire_blacklist() {
   Points retained;
   for (auto &target : blacklisted_targets) {
     auto k = key(target);
-    double expiry = blacklist_expiries.count(k) ? blacklist_expiries[k] : 0;
-    if (expiry > now)
+    auto expiry = blacklist_expiries.find(k);
+    // No expiry marks a repeated failure blacklisted for this mission.
+    if (expiry == blacklist_expiries.end() || expiry->second > now)
       retained.push_back(target);
     else {
       blacklist_expiries.erase(k);
+      blacklist_radii.erase(k);
+      collision_blacklist_radii.erase(k);
       filter("blacklist_expired", 1, 1, {{"target", json(target)}});
     }
   }
   blacklisted_targets = retained;
 }
 bool Mission::blacklist_failed() {
-  if (!failed_target || d("route_blacklist_cooldown_s") <= 0)
+  if (!failed_target)
     return false;
   V3 target = *failed_target;
+  for (const auto &attempt : inspection_attempts)
+    if ((attempt.target - target).norm() < retry_radius() &&
+        attempt.count >= i("route_target_max_attempts")) {
+      blacklist_exhausted_target(attempt.target);
+      return true;
+    }
+  if (d("route_blacklist_cooldown_s") <= 0)
+    return false;
   bool exists = false;
   for (auto &t : blacklisted_targets)
-    if ((t - target).norm() < .5) {
+    if ((t - target).norm() <= blacklist_radius(t)) {
       target = t;
       exists = true;
       break;
     }
+  // A later cooldown must never release a mission-long blacklist entry.
+  if (exists && !blacklist_expiries.count(key(target)))
+    return true;
   if (!exists)
     blacklisted_targets.push_back(target);
+  blacklist_radii[key(target)] = exists ? std::max(blacklist_radius(target), retry_radius()) : retry_radius();
   blacklist_expiries[key(target)] =
       ports.clock() + d("route_blacklist_cooldown_s");
   filter("blacklist_addition", 1, 0,
          {{"target", json(target)},
           {"planning_failure", nullable(plan_failure)},
-          {"radius", .5},
+          {"radius", blacklist_radius(target)},
           {"expires", true},
           {"cooldown_s", d("route_blacklist_cooldown_s")}});
   ports.diagnostics("warning",
@@ -521,6 +741,62 @@ bool Mission::blacklist_failed() {
                         std::to_string(d("route_blacklist_cooldown_s")) + "s.");
   force_replan = true;
   return true;
+}
+void Mission::blacklist_exhausted_target(const V3 &failed) {
+  V3 target = failed;
+  bool exists = false;
+  for (const auto &entry : blacklisted_targets)
+    if ((entry - target).norm() < retry_radius()) {
+      target = entry;
+      exists = true;
+      break;
+    }
+  if (exists && !blacklist_expiries.count(key(target)) && blacklist_radius(target) >= retry_radius())
+    return;
+  if (!exists)
+    blacklisted_targets.push_back(target);
+  double radius = exists && !blacklist_expiries.count(key(target))
+                      ? std::max(blacklist_radius(target), retry_radius()) : retry_radius();
+  blacklist_expiries.erase(key(target));
+  blacklist_radii[key(target)] = radius;
+  filter("blacklist_addition", 1, 0,
+         {{"target", json(target)}, {"reason", "attempt_budget_exhausted"},
+          {"radius", radius}, {"expires", false}});
+  ports.diagnostics("warning", "Repeatedly unreachable target blacklisted for "
+                                "the rest of this mission: " + json(target).dump());
+  force_replan = true;
+}
+double Mission::blacklist_radius(const V3 &target) const {
+  auto radius = blacklist_radii.find(key(target));
+  return radius == blacklist_radii.end() ? retry_radius() : radius->second;
+}
+double Mission::retry_radius() const { return d("route_blacklist_radius_m"); }
+bool Mission::collision_blacklisted(const V3 &target) const {
+  return std::any_of(collision_blacklist_radii.begin(), collision_blacklist_radii.end(), [&](const auto &entry) {
+    V3 center(entry.first[0], entry.first[1], entry.first[2]);
+    return (center - target).norm() <= entry.second + 1e-9;
+  });
+}
+void Mission::blacklist_collision_target(const V3 &target) {
+  if (collision_blacklisted(target))
+    return;
+  auto existing = std::find_if(blacklisted_targets.begin(), blacklisted_targets.end(),
+                              [&](const auto &entry) { return (entry - target).norm() < 1e-9; });
+  bool exists = existing != blacklisted_targets.end();
+  if (!exists)
+    blacklisted_targets.push_back(target);
+  double radius = d("route_collision_blacklist_radius_m");
+  if (exists && !blacklist_expiries.count(key(target)))
+    radius = std::max(radius, blacklist_radius(target));
+  blacklist_expiries.erase(key(target));
+  blacklist_radii[key(target)] = radius;
+  collision_blacklist_radii[key(target)] = d("route_collision_blacklist_radius_m");
+  filter("blacklist_addition", 1, 0,
+         {{"target", json(target)}, {"reason", "all_nbv_rays_collide"},
+          {"radius", radius}, {"expires", false}});
+  ports.diagnostics("warning", "All sampled NBV rays collide; blacklisting target and its " +
+                                std::to_string(radius) + "m neighborhood for this mission: " + json(target).dump());
+  force_replan = true;
 }
 bool Mission::stalled(const V3 &p, const Trajectory &remaining) {
   double now = ports.clock();
@@ -565,10 +841,37 @@ bool Mission::active_safe(const Voxels &occupied) {
   }
   return true;
 }
-void Mission::cancel() {
+void Mission::cancel(const Voxels *raw, const Voxels *collision) {
   int previous = active_trajectory.size();
+  // Stop downstream motion before performing the surrounding-ray checks.
   ports.publish({});
+  if (inspection_goal && !target_observed(inspection_goal->target)) {
+    failed_target = inspection_goal->target;
+    plan_failure = active_failure.empty() ? "inspection_route_cancelled" : active_failure;
+    bool collision_failure = active_failure == "new_obstacle_on_active_route" ||
+                             active_failure == "unsafe_current_route_entry" ||
+                             active_failure == "vehicle_inside_tracking_clearance";
+    if (raw && collision && collision_failure) {
+      auto probe = probe_nbv_views(inspection_goal->position, inspection_goal->target,
+                                   *collision, *raw, d("voxel_resolution"), camera_offset,
+                                   d("max_depth"), d("route_goal_max_extension_m"));
+      filter("nbv_collision_rays", probe.directions_checked, probe.clear_directions,
+             {{"target", json(inspection_goal->target)},
+              {"directions_checked", probe.directions_checked},
+              {"clear_directions", probe.clear_directions},
+              {"reason", probe.directions_checked && probe.goals.empty()
+                             ? "all_nbv_rays_collide" : "recheck_viewpoints"},
+              {"blacklist_radius_m", d("route_collision_blacklist_radius_m")}});
+      if (probe.directions_checked && probe.goals.empty())
+        blacklist_collision_target(inspection_goal->target);
+      // Clear directions remain eligible for immediate A* replanning.
+      force_replan = true;
+    } else
+      blacklist_failed();
+  }
+  inspection_goal.reset();
   active_trajectory.clear();
+  recovering_clearance = false;
   progress_position.reset();
   progress_time.reset();
   selected_targets.clear();
@@ -576,6 +879,135 @@ void Mission::cancel() {
          {{"reason", active_failure.empty() ? "new_obstacle_on_active_route"
                                             : active_failure},
           {"downstream_queue_cleared", true}});
+}
+bool Mission::target_observed(const V3 &target) const {
+  return std::any_of(visited_targets.begin(), visited_targets.end(),
+                     [&](const auto &v) { return (v - target).norm() < .5; });
+}
+void Mission::record_inspection_attempt(const V3 &target, const std::string &stage) {
+  auto record = std::find_if(inspection_attempts.begin(), inspection_attempts.end(),
+      [&](const auto &a) { return (a.target - target).norm() < retry_radius(); });
+  if (record == inspection_attempts.end()) {
+    inspection_attempts.push_back({target, 0, 0});
+    record = std::prev(inspection_attempts.end());
+  }
+  ++record->count;
+  record->started = ports.clock();
+  filter(stage, 1, stage == "inspection_attempt_started" ? 1 : 0,
+         {{"target", json(target)}, {"attempt", record->count},
+          {"timeout_s", d("route_target_timeout_s")},
+          {"region_center", json(record->target)}, {"matching_radius_m", retry_radius()}});
+  if (stage == "inspection_plan_failed" &&
+      record->count >= i("route_target_max_attempts"))
+    blacklist_exhausted_target(record->target);
+}
+void Mission::update_inspection_progress(const Voxels &raw) {
+  if (!inspection_goal)
+    return;
+  auto goal = *inspection_goal;
+  // Use the pose of this depth frame, not a prediction or a published route.
+  V3 camera = latched_position + body_rotation(latched_roll, latched_pitch, latched_yaw) * camera_offset;
+  V3 sight = goal.target - camera;
+  double distance = sight.norm();
+  double desired_yaw = atan2(goal.target.y() - latched_position.y(),
+                             goal.target.x() - latched_position.x());
+  double yaw_error = std::abs(atan2(sin(desired_yaw - latched_yaw), cos(desired_yaw - latched_yaw)));
+  if (depth_has_observations &&
+      (latched_position - goal.position).norm() <= std::max(.4, d("visit_radius")) &&
+      distance > 1e-9 && distance <= d("max_depth") &&
+      yaw_error <= nbv_parameters["visited_yaw_threshold_deg"].get<double>() * pi / 180 &&
+      clearance_free({camera, goal.target - sight.normalized() * std::min(2 * d("voxel_resolution"), distance * .5)},
+                     raw, d("voxel_resolution"), 0)) {
+    visited_targets.push_back(goal.target);
+    filter("inspection_target_observed", 1, 1,
+           {{"target", json(goal.target)}, {"resolved_goal", json(goal.position)},
+            {"measured_position", json(latched_position)}, {"camera_range_m", distance}});
+    active_failure = "inspection_goal_observed";
+    cancel();
+    force_replan = true;
+    return;
+  }
+  for (const auto &attempt : inspection_attempts)
+    if ((attempt.target - goal.target).norm() < retry_radius() &&
+        ports.clock() - attempt.started >= d("route_target_timeout_s")) {
+      active_failure = "inspection_attempt_timeout";
+      filter("inspection_attempt_timeout", 1, 0,
+             {{"target", json(goal.target)}, {"attempt", attempt.count},
+              {"elapsed_s", ports.clock() - attempt.started}});
+      cancel();
+      force_replan = true;
+      return;
+    }
+}
+bool Mission::recover_clearance(const Voxels &raw, const Voxels &collision) {
+  auto state = motion_snapshot();
+  double resolution = d("voxel_resolution"), radius = d("collision_radius"),
+         margin = d("collision_tracking_margin"), now = ports.clock();
+  bool inside = collision.count(voxel(state.position, resolution));
+  if (recovering_clearance) {
+    auto remaining = reconnect(active_trajectory, state.position, state.yaw, {}, resolution);
+    if (remaining.empty() || !retreat_safe(positions(remaining), raw, resolution, radius)) {
+      active_failure = "clearance_recovery_unsafe_or_stalled";
+      cancel();
+      recovery_retry_time = now + d("route_stall_timeout_s");
+    } else if ((state.position - active_trajectory.back().head<3>()).norm() <=
+                   std::max(.4, d("visit_radius")) &&
+               !inside && obstacle_clearance(state.position, raw, resolution) >=
+                              radius + margin + resolution) {
+      active_failure = "clearance_recovered";
+      cancel();
+      force_replan = true;
+      failed_plan_count = 0;
+      return false;
+    } else if (stalled(state.position, remaining)) {
+      active_failure = "clearance_recovery_unsafe_or_stalled";
+      cancel();
+      recovery_retry_time = now + d("route_stall_timeout_s");
+    } else {
+      return true;
+    }
+  }
+  if (!inside)
+    return false;
+  if (!active_trajectory.empty()) {
+    active_failure = "vehicle_inside_tracking_clearance";
+    cancel(&raw, &collision);
+  }
+  // Recovery is independent of NBV availability. A blocked vehicle is not a
+  // completed mission, and repeatedly running the same A* cannot free its start.
+  force_replan = true;
+  if (now < recovery_retry_time)
+    return true;
+  recovery_retry_time = now + d("route_stall_timeout_s");
+  auto path = clearance_retreat(state.position, raw, collision, resolution, radius, margin);
+  filter("clearance_recovery", 1, path.empty() ? 0 : 1,
+         {{"vehicle_position", json(state.position)}, {"path", json(path)},
+          {"obstacle_clearance_m", obstacle_clearance(state.position, raw, resolution)},
+          {"body_radius_m", radius}, {"tracking_margin_m", margin},
+          {"reason", path.empty() ? "no_safe_retreat_hold" : "retreat_from_tracking_buffer"}});
+  if (path.empty()) {
+    plan_failure = "clearance_recovery_blocked";
+    ports.diagnostics("warning", "Inside collision clearance; no safe retreat, holding position.");
+    return true;
+  }
+  Trajectory retreat;
+  for (const auto &p : path)
+    retreat.emplace_back(p.x(), p.y(), p.z(), state.yaw);
+  // Odometry can advance on its callback group during the bounded search.
+  state = motion_snapshot();
+  retreat = reconnect(retreat, state.position, state.yaw, {}, resolution);
+  recovery_obstacles = raw;
+  recovering_clearance = true;
+  if (!publish_trajectory(retreat, {}, true)) {
+    recovering_clearance = false;
+    plan_failure = "clearance_recovery_wire_collision";
+  } else {
+    selected_targets.clear();
+    progress_position = state.position;
+    progress_time = now;
+    plan_failure.clear();
+  }
+  return true;
 }
 void Mission::tick() {
   if (finished_mapping)
@@ -618,22 +1050,27 @@ void Mission::tick() {
                                 ": OctoMap total size = " +
                                 std::to_string(occupied.size()) + " voxels.");
   start = ports.clock();
-  Voxels keys;
-  for (auto &v : occupied)
-    keys.insert(voxel(v, d("voxel_resolution")));
+  auto keys = map.collision_voxels(d("voxel_resolution"));
   auto collision =
-      inflate(keys, d("collision_radius") + d("collision_tracking_margin"),
+      inflate_clearance(keys, d("collision_radius") + d("collision_tracking_margin"),
               d("voxel_resolution"));
   stage("collision_inflation", start, true);
+  update_inspection_progress(keys);
+  if (recover_clearance(keys, collision)) {
+    stage("planning_cycle_total", started, true);
+    std::lock_guard<std::mutex> lock(state_mutex);
+    ++iteration;
+    return;
+  }
   bool blocked = !active_safe(collision);
   if (blocked) {
-    cancel();
+    cancel(&keys, &collision);
     ports.diagnostics("warning", "Active trajectory cancelled (" +
                                      active_failure + "); forcing replan!");
   }
   bool arrived = false;
   auto state = motion_snapshot();
-  if (b("replan_on_target_arrival"))
+  if (b("replan_on_target_arrival") && !inspection_goal)
     for (auto &t : selected_targets)
       if ((state.position - t).norm() < d("arrival_target_radius")) {
         arrived = true;
@@ -668,6 +1105,7 @@ void Mission::tick() {
        heading(cos(state.yaw), sin(state.yaw), 0);
     start = ports.clock();
     Json parameters = nbv_parameters;
+    parameters["defer_utility_normalization"] = true;
     parameters["seabed_estimate_z"] = nullable(seabed.mean_z);
     parameters["seabed_sample_count"] = seabed.sample_count;
     std::vector<Candidate> candidates_;
@@ -703,21 +1141,31 @@ void Mission::tick() {
           "candidates=" + std::to_string(candidates_.size()));
     expire_blacklist();
     std::vector<Candidate> safe;
+    double maximum_ban_radius = 0;
+    for (const auto &target : blacklisted_targets)
+      maximum_ban_radius = std::max(maximum_ban_radius, blacklist_radius(target));
     for (auto &c : candidates_) {
       Json bans = Json::array();
+      double matched_radius = 0;
       for (auto &t : blacklisted_targets)
-        if ((c.target - t).norm() < .5)
-          bans.push_back(
-              {{"target", json(t)},
-               {"distance", (c.target - t).norm()},
-               {"remaining_s",
-                std::max(0., blacklist_expiries.at(key(t)) - ports.clock())}});
+        if ((c.target - t).norm() <= blacklist_radius(t) + 1e-9) {
+          auto expiry = blacklist_expiries.find(key(t));
+          Json ban = {{"target", json(t)}, {"distance", (c.target - t).norm()}};
+          ban["radius"] = blacklist_radius(t);
+          matched_radius = std::max(matched_radius, blacklist_radius(t));
+          if (expiry == blacklist_expiries.end()) {
+            ban["remaining_s"] = nullptr;
+            ban["expires"] = false;
+          } else
+            ban["remaining_s"] = std::max(0., expiry->second - ports.clock());
+          bans.push_back(ban);
+        }
       if (bans.empty())
         safe.push_back(c);
       filter("candidate_blacklist", 1, bans.empty() ? 1 : 0,
              {{"cluster_id", c.cluster_id},
               {"target", json(c.target)},
-              {"radius", .5},
+              {"radius", bans.empty() ? retry_radius() : matched_radius},
               {"matching_bans", bans}});
     }
     if (safe.size() < candidates_.size())
@@ -726,19 +1174,20 @@ void Mission::tick() {
                             std::to_string(candidates_.size() - safe.size()) +
                             " blacklisted targets.");
     filter("blacklist", candidates_.size(), safe.size(),
-           {{"radius", .5},
+           {{"radius", blacklisted_targets.empty() ? retry_radius() : maximum_ban_radius},
             {"blacklisted_target_count", blacklisted_targets.size()}});
-    bool published = plan_and_publish(safe, collision);
+    const size_t generated_count = candidates_.size();
+    bool published = plan_and_publish(safe, collision, &keys, &candidates_);
     std::string failure =
-        candidates_.empty()
+        generated_count == 0
             ? (empty_reason.empty() ? "nbv_generation_returned_no_candidates"
                                     : empty_reason)
         : safe.empty() ? "blacklist_removed_all"
                        : plan_failure;
-    filter("planning_result", candidates_.size(), int(published),
+    filter("planning_result", generated_count, int(published),
            {{"published", published},
             {"reason", published ? "published" : failure},
-            {"generated_candidates", candidates_.size()},
+            {"generated_candidates", generated_count},
             {"after_blacklist", safe.size()},
             {"active_trajectory_points", active_trajectory.size()}});
     if (!published)
@@ -746,7 +1195,13 @@ void Mission::tick() {
                         "[NBV_EMPTY] No trajectory published: " + failure);
     if (published)
       failed_plan_count = 0;
-    else if (!force_replan) {
+    else if (failure == "target_attempts_exhausted" || failure == "collision_blacklist_removed_all" ||
+             (!blacklisted_targets.empty() &&
+              (safe.empty() || plan_failure == "minimum_utility_removed_all"))) {
+      filter("inspection_waiting", safe.size(), 0,
+             {{"reason", failure}, {"mission_complete", false}});
+      failed_plan_count = 0;
+    } else if (!force_replan) {
       if (!safe.empty()) {
         if (!blacklist_failed()) {
           filter("blacklist_skipped", safe.size(), safe.size(),

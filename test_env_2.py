@@ -20,6 +20,10 @@ import pyoctomap as octomap
 
 PROJECT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_DIR / "src" / "python_planner"))
+sys.path.insert(0, str(PROJECT_DIR / "src" / "benchmark_evaluator"))
+from benchmark_evaluator.adapters.permanent_bans import (
+    BAN_SPHERES_FILENAME, PermanentBanRecorder, load_ban_spheres, target_is_banned,
+)
 from python_planner.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
 from python_planner.domain.seabed import SeabedEstimate
 from python_planner.use_cases.nbv import (
@@ -178,6 +182,23 @@ def add_sphere(geometries, position, radius, color):
     sphere.paint_uniform_color(color)
     geometries.append(sphere)
 
+def add_ban_spheres(geometries, spheres):
+    """Draw wire volumes so the mapped surface remains visible inside each ban."""
+    for value in spheres:
+        mesh = o3d.geometry.TriangleMesh.create_sphere(radius=value['radius_m'], resolution=12)
+        mesh.translate(value['center'])
+        wire = o3d.geometry.LineSet.create_from_triangle_mesh(mesh)
+        wire.paint_uniform_color([.7, .05, .05])
+        geometries.append(wire)
+
+def load_viewer_bans(map_path, override=None):
+    """Refresh the default benchmark snapshot; explicit snapshots stay frozen."""
+    if override is None:
+        recorder = PermanentBanRecorder(Path(map_path).parent)
+        recorder.poll()
+    path = Path(override) if override is not None else Path(map_path).parent / BAN_SPHERES_FILENAME
+    return path, load_ban_spheres(path)
+
 
 def batch_marker_meshes(geometries):
     """Combine sphere markers into one draw object, retaining per-vertex colors."""
@@ -252,10 +273,14 @@ def main():
     parser = argparse.ArgumentParser(description="Visualize NBV selection after the latest trajectory.")
     parser.add_argument("--trajectory-csv", type=Path, help="Override the latest trajectory CSV.")
     parser.add_argument("--map", type=Path, default=PROJECT_DIR / "results" / "final_map_ros2.bt")
+    parser.add_argument("--ban-spheres", type=Path,
+                        help="Saved permanent ban spheres (default: alongside the map).")
     parser.add_argument("--no-gui", action="store_true", help="Evaluate without opening Open3D.")
     parser.add_argument("--future-trajectory", action=argparse.BooleanOptionalAction,
                         default=False, help="Calculate and show the planner's future path (default: off).")
     args = parser.parse_args()
+    ban_path, ban_spheres = load_viewer_bans(args.map, args.ban_spheres)
+    print(f"Permanent ban spheres: {len(ban_spheres)} from {ban_path}")
     parameters = DEFAULT_NBV_PARAMETERS
     trajectory_path, trajectory = load_latest_trajectory(PROJECT_DIR / "results", args.trajectory_csv)
     yaws = trajectory_yaws(trajectory)
@@ -283,9 +308,13 @@ def main():
         min_samples=parameters['cluster_min_samples'])
     clusters, observed = filter_observed_clusters(clusters, trajectory, yaws, parameters)
     print(f"Coverage filter: {len(observed)} observed clusters removed; {len(clusters)} remain.")
+    banned_clusters = [c for c in clusters if target_is_banned(c['centroid'], ban_spheres)]
+    clusters = [c for c in clusters if not target_is_banned(c['centroid'], ban_spheres)]
+    print(f"Permanent ban filter: {len(banned_clusters)} clusters removed; {len(clusters)} remain.")
 
     pcd.paint_uniform_color([0.5, 0.5, 0.5])
     geometries = [pcd]
+    add_ban_spheres(geometries, ban_spheres)
     path = o3d.geometry.LineSet()
     path.points = o3d.utility.Vector3dVector(trajectory)
     segments = np.column_stack((np.arange(len(trajectory) - 1), np.arange(1, len(trajectory))))
@@ -376,13 +405,29 @@ def main():
 
     if not args.no_gui:
         print("Gray: Surface | Green: Trajectory/start | Blue: Last point/AUV | Red: Remaining frontiers")
-        print("Magenta: Candidates | Yellow: Cluster winners | Cyan: Global best NBV")
+        print("Magenta: Candidates | Yellow: Cluster winners | Cyan: Global best NBV | Labels: Cluster IDs")
+        print("Dark red wire spheres: Permanent ban regions (saved map centres and radii)")
         if args.future_trajectory:
             print("Orange: Collision-checked future trajectory/end")
 
-        # The legacy visualizer displays geometry without 3D text labels.
-        o3d.visualization.draw_geometries(
-            batch_marker_meshes(geometries), window_name="NBV cluster winners")
+        def add_cluster_labels(visualizer):
+            pass
+            # for sphere in ban_spheres:
+            #     radius = sphere['radius_m']
+            #     visualizer.add_3d_label(np.asarray(sphere['center']) + [0, 0, radius + .1],
+            #                            f"Permanent ban ({radius:g} m)")
+            # for winner in winners.values():
+            #     label_position = winner['position'] + np.array([0.0, 0.0, 0.25])
+            #     label = f"Cluster {winner['cluster_id']}"
+            #     if winner is best:
+            #         label += " (best)"
+            #     visualizer.add_3d_label(label_position, label)
+
+        # The GUI visualizer supports screen-facing text anchored to 3D positions.
+        o3d.visualization.draw(
+            geometries, title="NBV cluster winners", raw_mode=True,
+            bg_color=(1.0, 1.0, 1.0, 1.0), show_skybox=False,
+            line_width=3, on_init=add_cluster_labels)
 
 
 if __name__ == "__main__":

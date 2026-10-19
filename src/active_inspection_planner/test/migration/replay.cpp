@@ -40,6 +40,9 @@ struct ReplayMap : OccupancyMap {
       real->insert(points_, origin, range);
   }
   Points occupied() const override { return real ? real->occupied() : p; }
+  Voxels collision_voxels(double r) const override {
+    return real ? real->collision_voxels(r) : OccupancyMap::collision_voxels(r);
+  }
   size_t leaves() const override { return real ? real->leaves() : p.size(); }
   void write(const std::string &path) override {
     writes.push_back(path);
@@ -60,8 +63,59 @@ Json run(const Json &j) {
             {"reason", result.reason},
             {"expansions", result.expansions}};
   }
+  if (op == "view_standoff" || op == "view_surround") {
+    auto raw = occupied(j.value("raw_occupied", Json::array()));
+    if (j.contains("load")) {
+      Octomap map(r);
+      map.load(j.at("load"));
+      raw = map.collision_voxels(r);
+      occ = inflate_clearance(raw, j.value("clearance", .8), r);
+    }
+    auto search = op == "view_surround" ? astar_view_surround : astar_view_standoff;
+    auto result = search(
+        vec3(j.at("start")), vec3(j.at("goal")), vec3(j.at("target")),
+        occ, raw, r, vec3(j.value("offset", Json{0, 0, 0})),
+        j.value("max_range", 5.), j.value("max_extension", 1.5),
+        j.value("max_steps", 50000));
+    Json out = {{"path", json(result.path)}, {"reason", result.reason},
+            {"expansions", result.expansions},
+            {"collision_free", collision_free(result.path, occ, r)}};
+    if (op == "view_surround") {
+      out["directions_checked"] = result.directions_checked;
+      out["clear_directions"] = result.clear_directions;
+    }
+    return out;
+  }
   if (op == "inflate")
     return keys(inflate(occ, j.at("radius"), r));
+  if (op == "clearance_inflate")
+    return keys(inflate_clearance(occ, j.at("radius"), r));
+  if (op == "retreat_safe")
+    return retreat_safe(points(j.at("path")), occ, r, j.at("radius"));
+  if (op == "clearance_retreat") {
+    if (j.contains("load")) {
+      Octomap map(r);
+      map.load(j.at("load"));
+      occ = map.collision_voxels(r);
+    }
+    double radius = j.at("radius"), margin = j.at("margin");
+    auto inflated = inflate_clearance(occ, radius + margin, r);
+    auto start = vec3(j.at("start"));
+    auto path = clearance_retreat(start, occ, inflated, r, radius, margin);
+    return {{"path", json(path)},
+            {"start_clearance", obstacle_clearance(start, occ, r)},
+            {"end_clearance", path.empty() ? 0 : obstacle_clearance(path.back(), occ, r)},
+            {"safe", retreat_safe(path, occ, r, radius)},
+            {"end_free", !path.empty() && !inflated.count(voxel(path.back(), r))}};
+  }
+  if (op == "octomap_collision") {
+    Octomap map(r);
+    if (j.contains("load"))
+      map.load(j.at("load"));
+    for (auto &scan : j.value("scans", Json::array()))
+      map.insert(points(scan.at("points")), vec3(scan.at("origin")), scan.value("max_range", -1.));
+    return keys(map.collision_voxels(r));
+  }
   if (op == "collision")
     return collision_free(points(j.at("path")), occ, r, j.value("factor", .5));
   if (op == "route") {
@@ -97,6 +151,27 @@ Json run(const Json &j) {
       states.push_back({{"changed", changed},
                         {"mean_z", s.mean_z ? Json(*s.mean_z) : Json(nullptr)},
                         {"sample_count", s.sample_count}});
+    }
+    return states;
+  }
+  if (op == "nbv_sequence") {
+    NBVCache cache;
+    Json states = Json::array();
+    for (const auto &step : j.at("steps")) {
+      std::vector<std::pair<V3, double>> history;
+      for (const auto &pose : step.value("history", Json::array()))
+        history.emplace_back(vec3(pose[0]), pose[1].get<double>());
+      auto result = nbv(points(step.at("points")), vec3(step.at("position")),
+                        vec3(step.value("heading", Json{1, 0, 0})), history,
+                        step.value("parameters", Json::object()), {}, {}, &cache);
+      Json cs = Json::array(), geometry = Json::array();
+      for (const auto &c : result)
+        cs.push_back(json(c));
+      for (const auto &entry : cache.clusters)
+        geometry.push_back({{"id", entry.geometry.id},
+                            {"centroid", json(entry.geometry.centroid)},
+                            {"points", json(entry.geometry.points)}});
+      states.push_back({{"candidates", cs}, {"clusters", geometry}});
     }
     return states;
   }
@@ -206,12 +281,15 @@ Json run(const Json &j) {
       map.real = std::make_unique<Octomap>(
           j.value("config", Json::object()).value("voxel_resolution", .1));
       map.write_map = j.value("write_map", false);
+      if (j.contains("load"))
+        map.real->load(j.at("load"));
     }
     ports.telemetry = [&](const Json &event) {
       events.push_back(event);
       if (files)
         files->record(event);
-      if (move && event.value("stage", "") == "route_search") {
+      if (move && (event.value("stage", "") == "route_search" ||
+                   event.value("stage", "") == "clearance_recovery")) {
         pointer->position = *move;
         move.reset();
       }
@@ -244,18 +322,49 @@ Json run(const Json &j) {
         result = json(m.depth_points(frame(e.at("frame"))));
       else if (type == "map")
         map.p = points(e.at("points"));
+      else if (type == "target_history") {
+        // Restore captured eligibility state for sequential incident replay.
+        m.visited_targets = points(e.value("observed", Json::array()));
+        m.inspection_attempts.clear();
+        for (const auto &a : e.value("attempts", Json::array()))
+          m.inspection_attempts.push_back({vec3(a.at("target")), a.at("count"), a.value("started", 0.)});
+        m.blacklisted_targets.clear();
+        m.blacklist_expiries.clear();
+        m.blacklist_radii.clear();
+        m.collision_blacklist_radii.clear();
+        for (const auto &ban : e.value("blacklist", Json::array())) {
+          V3 target = vec3(ban.at("target"));
+          std::array<double, 3> k{target.x(), target.y(), target.z()};
+          m.blacklisted_targets.push_back(target);
+          m.blacklist_radii[k] = ban.value("radius", m.retry_radius());
+          if (ban.value("reason", "") == "all_nbv_rays_collide")
+            m.collision_blacklist_radii[k] = m.blacklist_radii[k];
+          if (ban.contains("expires_at"))
+            m.blacklist_expiries[k] = ban.at("expires_at");
+        }
+      }
       else if (type == "request")
         m.request(e.value("value", true));
-      else if (type == "tick")
+      else if (type == "tick") {
+        if (e.contains("move_during_recovery"))
+          move = vec3(e.at("move_during_recovery"));
         m.tick();
-      else if (type == "cancel")
+      } else if (type == "cancel")
         m.cancel();
       else if (type == "plan") {
         if (e.contains("move_during_plan"))
           move = vec3(e.at("move_during_plan"));
-        result =
-            m.plan_and_publish(candidates(e.at("candidates")),
-                               occupied(e.value("occupied", Json::array())));
+        if (e.value("use_map_collision", false)) {
+          double resolution = m.config.at("voxel_resolution");
+          auto raw = map.collision_voxels(resolution);
+          auto collision = inflate_clearance(
+              raw, m.config.at("collision_radius").get<double>() +
+                       m.config.at("collision_tracking_margin").get<double>(), resolution);
+          result = m.plan_and_publish(candidates(e.at("candidates")), collision, &raw);
+        } else {
+          result = m.plan_and_publish(candidates(e.at("candidates")),
+                                     occupied(e.value("occupied", Json::array())));
+        }
       } else if (type == "publish")
         result =
             m.publish_trajectory(trajectory(e.at("trajectory")),

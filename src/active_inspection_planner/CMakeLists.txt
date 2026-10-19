@@ -41,7 +41,7 @@ add_library(planner_numerics STATIC ${FITPACK_SOURCES} vendor/scipy/lbfgsb.c
   vendor/scipy/ckdtree/query_ball_point.cxx)
 target_compile_features(planner_numerics PRIVATE cxx_std_17)
 target_link_libraries(planner_numerics PUBLIC ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES})
-add_library(planner_migration src/migration/route.cpp src/migration/nbv.cpp
+add_library(planner_migration src/migration/route.cpp src/migration/collision.cpp src/migration/nbv.cpp
   src/migration/optimization.cpp src/migration/configuration.cpp src/migration/mission.cpp)
 target_compile_features(planner_migration PUBLIC cxx_std_17)
 target_include_directories(planner_migration PUBLIC
@@ -74,7 +74,6 @@ install(TARGETS inspection_planner_node planner_replay DESTINATION lib/${PROJECT
 install(TARGETS planner_migration planner_migration_adapters planner_numerics
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
 install(FILES vendor/json.hpp DESTINATION include)
-install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 
 add_library(inspection_policy src/policy/mapping.cpp src/search_algo.cpp)
 target_compile_features(inspection_policy PUBLIC cxx_std_17)
@@ -107,7 +106,22 @@ if(BUILD_TESTING)
   add_test(NAME planner_telemetry
     COMMAND ${Python3_EXECUTABLE} -m pytest -q
       ${CMAKE_CURRENT_SOURCE_DIR}/test/migration/test_telemetry.py)
-  set_tests_properties(planner_differential planner_telemetry PROPERTIES
+  add_test(NAME planner_nbv_cache
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/migration/test_nbv_cache.py)
+  add_test(NAME planner_collision_recovery
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/migration/test_collision_recovery.py)
+  add_test(NAME planner_goal_standoff
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/migration/test_goal_standoff.py)
+  add_test(NAME planner_target_lifecycle
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/migration/test_target_lifecycle.py)
+  add_test(NAME planner_eligible_scoring
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/migration/test_eligible_scoring.py)
+  set_tests_properties(planner_differential planner_telemetry planner_nbv_cache planner_collision_recovery planner_goal_standoff planner_target_lifecycle planner_eligible_scoring PROPERTIES
     ENVIRONMENT "PLANNER_REPLAY=$<TARGET_FILE:planner_replay>;PYTHONDONTWRITEBYTECODE=1;OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MPLCONFIGDIR=/tmp/planner_migration_mpl"
     TIMEOUT 240)
   find_package(ament_lint_auto REQUIRED)

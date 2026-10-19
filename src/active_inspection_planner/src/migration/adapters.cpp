@@ -32,6 +32,23 @@ Points Octomap::occupied() const {
   }
   return out;
 }
+Voxels Octomap::collision_voxels(double resolution) const {
+  Voxels out;
+  for (auto it = tree.begin_leafs(); it != tree.end_leafs(); ++it) {
+    if (!tree.isNodeOccupied(*it))
+      continue;
+    V3 center(it.getX(), it.getY(), it.getZ());
+    // Include every planner cell overlapping the leaf, including coarse leaves.
+    V3 half = V3::Constant(it.getSize() * .5);
+    Key lo = voxel(center - half + V3::Constant(resolution * 1e-6), resolution);
+    Key hi = voxel(center + half - V3::Constant(resolution * 1e-6), resolution);
+    for (int x = lo[0]; x <= hi[0]; ++x)
+      for (int y = lo[1]; y <= hi[1]; ++y)
+        for (int z = lo[2]; z <= hi[2]; ++z)
+          out.insert({x, y, z});
+  }
+  return out;
+}
 void Octomap::write(const std::string &path) { tree.write(path); }
 void Octomap::load(const std::string &path) {
   std::unique_ptr<octomap::AbstractOcTree> loaded(

@@ -16,7 +16,8 @@ from .domain.evaluation import MapEvaluationConfig
 
 DEFAULT_CONFIG = MapEvaluationConfig(
     '/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/final_map_ros2.bt',
-    '/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_m_l100_390.OBJ')
+    '/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_full.OBJ')
+    # '/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/Tools/3D_scan/GT/objects/SM_MERGED_pipe_m_l100_390.OBJ')
 
 def evaluate_map_accuracy(headless=False, config=DEFAULT_CONFIG):
     from .adapters.map_geometry import Open3DMapEvaluation

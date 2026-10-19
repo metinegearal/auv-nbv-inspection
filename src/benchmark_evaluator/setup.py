@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'run_baselines = benchmark_evaluator.run_baselines:main',
             'plot_benchmark_results = benchmark_evaluator.plot_results:main',
+            'save_planner_bans = benchmark_evaluator.adapters.permanent_bans:main',
         ],
     },
 )

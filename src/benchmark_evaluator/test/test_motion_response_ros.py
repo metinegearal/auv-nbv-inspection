@@ -1,5 +1,6 @@
 """Exercise production evaluator subscriptions and completion reports over ROS."""
 import csv
+import json
 import time
 
 import pytest
@@ -15,6 +16,10 @@ def test_waypoint_and_odometry_topics_save_response_on_completion(tmp_path, monk
     from std_msgs.msg import Bool, Float32MultiArray
 
     monkeypatch.setenv('MPLBACKEND', 'Agg')
+    (tmp_path / 'planner_nbv_filters.jsonl').write_text(json.dumps({
+        'stage': 'blacklist_addition', 'iteration': 10, 'frame_id': 20,
+        'details': {'target': [10., 20., -30.], 'radius': 1.,
+                    'expires': False, 'reason': 'all_nbv_rays_collide'}}) + '\n')
     rclpy.init(args=['--ros-args', '-p', f'results_dir:={tmp_path}',
                      '-p', 'show_reference_objects:=false'])
     evaluator = BenchmarkLogger()
@@ -36,6 +41,10 @@ def test_waypoint_and_odometry_topics_save_response_on_completion(tmp_path, monk
 
     try:
         wait(lambda: all(pub.get_subscription_count() for pub in (odometry, waypoint, completion)))
+        wait(lambda: (tmp_path / 'permanent_ban_spheres.json').exists())
+        bans = json.loads((tmp_path / 'permanent_ban_spheres.json').read_text())
+        assert bans['spheres'][0]['center'] == [10., 20., -30.]
+        assert bans['spheres'][0]['radius_m'] == 1.
         odom = Odometry()
         odom.pose.pose.orientation.w = 1.
         odom.pose.pose.position.x = 10.
@@ -60,6 +69,7 @@ def test_waypoint_and_odometry_topics_save_response_on_completion(tmp_path, monk
         assert records[0]['final_error_m'] == '0.0'
         assert records[0]['end_reason'] == 'mission_finished'
         assert (tmp_path / 'motion_control_response.png').stat().st_size > 0
+        assert len(list(tmp_path.glob('permanent_ban_spheres_*.json'))) == 1
     finally:
         executor.shutdown()
         evaluator.destroy_node()

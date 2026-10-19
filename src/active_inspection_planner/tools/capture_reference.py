@@ -16,7 +16,7 @@ def read(name, default):
     parameters[name] = default
     return default
 load_configuration(read)
-(package / 'config/reference_defaults.json').write_text(json.dumps(parameters, indent=2) + '\n')
+(package / 'migration_evidence/reference_defaults.json').write_text(json.dumps(parameters, indent=2) + '\n')
 cpp = '#include "active_inspection_planner/migration/core.hpp"\nnamespace inspection::migration {\n'
 cpp += 'Json defaults() { return Json::parse(R"json(' + json.dumps(parameters) + ')json"); }\n'
 cpp += 'Json nbv_defaults() { return Json::parse(R"json(' + json.dumps(DEFAULT_NBV_PARAMETERS) + ')json"); }\n}\n'

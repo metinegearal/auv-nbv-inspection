@@ -32,5 +32,5 @@ class MapEvaluationConfig:
     octomap_file: str
     ground_truth_file: str
     obj_center_x: float = -13.0
-    obj_center_y: float = -81.9
+    obj_center_y: float = -84.75 # -81.9
     surface_z: float = -32.0

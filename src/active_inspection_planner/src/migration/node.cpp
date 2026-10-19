@@ -31,7 +31,8 @@ public:
     if (config["route_max_candidates"].get<int64_t>() < 1)
       throw std::invalid_argument(
           "route_max_candidates must be a positive integer");
-    for (auto k : {"route_stall_timeout_s", "route_stall_min_progress_m"}) {
+    for (auto k : {"route_stall_timeout_s", "route_stall_min_progress_m",
+                   "route_blacklist_radius_m", "route_collision_blacklist_radius_m"}) {
       double v = config[k];
       if (!(v > 0 && v < INFINITY))
         throw std::invalid_argument(std::string(k) +
