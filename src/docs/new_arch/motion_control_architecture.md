@@ -1,19 +1,19 @@
-# `motion_control` Architecture
+# `auv_motion_control` Architecture
 
 ## Overview
-The `motion_control` package separates ROS 2 middleware and platform-specific thruster allocation from trajectory queueing and proportional waypoint guidance. The PID class remains a reusable mathematical utility; the active guidance law uses the existing proportional yaw/distance gains.
+The `auv_motion_control` package separates ROS 2 middleware and platform-specific thruster allocation from trajectory queueing and proportional waypoint guidance. The PID class remains a reusable mathematical utility; the active guidance law uses the existing proportional yaw/distance gains.
 
 ## Layer Breakdown
 
-### 1. Domain (`include/motion_control/domain/`)
+### 1. Domain (`include/auv_motion_control/domain/`)
 *   **`contracts.hpp`:** Defines the pure C++ interfaces required by the control logic (`CommandOutput`, `WaypointOutput`, `ThrusterMixer`, `Diagnostics`).
 *   **`math_pid_utils.hpp`:** Contains purely mathematical utilities (quaternion conversion, 2D/3D distance) and a framework-agnostic `PID` controller class.
 
-### 2. Use Cases (`include/motion_control/use_cases/`)
+### 2. Use Cases (`include/auv_motion_control/use_cases/`)
 *   **`waypoint_controller.hpp`:** Computes heading errors, applies proportional gains, determines directional movement, and calls the injected `ThrusterMixer` to allocate command contributions. It uses standard C++ values and policy-owned ports.
 *   **`trajectory_queue.hpp`:** Manages the sequential execution of waypoints. It pops waypoints when reached and triggers a request for a new trajectory when empty.
 
-### 3. Interface Adapters (`include/motion_control/adapters/` & `src/`)
+### 3. Interface Adapters (`include/auv_motion_control/adapters/` & `src/`)
 *   **`ros_control_io.hpp`:** Implements `CommandOutput` and `Diagnostics` by wrapping `rclcpp::Publisher` calls.
 *   **`thrusters.hpp` (`EightThrusterMixer`):** A platform-specific implementation of `ThrusterMixer` that maps directional keys and yaw contributions to the existing eight simulator command values. These values are not PWM signals. `ConfiguredModes` supplies the existing mode settings through the `Modes` port.
 *   **`waypoint_control_node.cpp` & `point_iterator.cpp`:** The ROS 2 Composition Roots. They subscribe to topics, unpack ROS messages into domain `structs`, and execute the Use Cases.

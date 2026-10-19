@@ -1,6 +1,6 @@
 # NBV filter audit
 
-Scope: source code in `src/python_planner`, inspected on 2026-10-04. These are code findings, not proof of which condition caused a particular run to lose a target. No planner behavior was changed during this audit. Line numbers below refer to the audit snapshot before diagnostic logging was added; see `NBV_FILTER_LOGGING.md` to trace failures in a run.
+Scope: source code in `src/auv_planner_reference`, inspected on 2026-10-04. These are code findings, not proof of which condition caused a particular run to lose a target. No planner behavior was changed during this audit. Line numbers below refer to the audit snapshot before diagnostic logging was added; see `NBV_FILTER_LOGGING.md` to trace failures in a run.
 
 ## Checks that can discard a useful NBV
 

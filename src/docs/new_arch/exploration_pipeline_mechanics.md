@@ -8,19 +8,19 @@ The following diagram illustrates the active ROS 2 nodes and the specific topics
 
 ```mermaid
 graph TD
-    SB[sim_bridge<br/>holoocean_node]
-    BE[benchmark_evaluator<br/>run_baselines]
+    SB[auv_sim_bridge<br/>holoocean_node]
+    BE[auv_benchmark<br/>run_baselines]
     subgraph Control Layer
-        WC[motion_control<br/>waypoint_control_node]
-        PI[motion_control<br/>point_iterator]
+        WC[auv_motion_control<br/>waypoint_control_node]
+        PI[auv_motion_control<br/>point_iterator]
     end
 
     subgraph Perception Layer
-        DE[perception<br/>depth_estimation]
+        DE[auv_stereo_depth<br/>depth_estimation]
     end
 
     subgraph Planning Layer
-        PN[python_planner<br/>planner_node]
+        PN[auv_planner_reference<br/>planner_node]
     end
 
     DE -- "holocean/depth/image_raw<br/>(sensor_msgs/Image)" --> PN
@@ -76,7 +76,7 @@ The policy calculates frontiers and information gain versus kinematic cost. `get
 *   **Minimum cloud size:** The retained cloud must satisfy `cluster_min_samples` and `frontier_min_neighbors + 1` (at least three points); there is no fixed 40-point cutoff.
 
 ### 2. PCA Complexity & Frontier Detection
-*   **Focus window:** Frontier query centers are limited to cleaned surface points within `nbv_exploration_radius` of the current AUV position (default 15 m, configured in bringup's `nbv_params.yaml`). Full-cloud neighbors and original global indices are retained. An empty focus window returns no candidates; distant frontiers are deferred.
+*   **Focus window:** Frontier query centers are limited to cleaned surface points within `nbv_exploration_radius` of the current AUV position (default 15 m, configured in auv_bringup's `nbv_params.yaml`). Full-cloud neighbors and original global indices are retained. An empty focus window returns no candidates; distant frontiers are deferred.
 *   **PCA Complexity:** After clustering, only clustered focus points are scored. A shared full-cloud KDTree finds $K$ neighbors for each scored point. The eigenvalues of the local covariance matrix are computed. The ratio of the smallest eigenvalue to the sum of all eigenvalues determines the "complexity" (roughness) of the surface.
 *   **Frontiers:** Tangent-plane neighbor angles identify angular gaps exceeding `frontier_angle_threshold_deg` (e.g., 130°). Neighbors are bounded by `frontier_radius` (0.5 m) and capped at `frontier_neighbors` (40), with at least `frontier_min_neighbors` (3) usable tangent directions. Normals are normalized; zero tangent projections cannot fill gaps.
 
@@ -92,7 +92,7 @@ The policy calculates frontiers and information gain versus kinematic cost. `get
     `Utility = Normalized_Gain - Normalized_Cost`.
 *   **Observation history:** The existing distance window and historical-yaw/bearing conditions filter previously observed frontier points. A winner is retained per cluster and sorted by utility.
 
-The mission then routes accepted candidates through `python_planner/route_planning.py`, generates and checks splines, resamples/reconnects, and applies existing safe fallbacks. Optional optimization is a separate step and is disabled in the shipped profile. Wire encoding adds the camera offset and casts to Float32; the adapter reconstructs executed coordinates for the final policy collision check. The queue subtracts the same offset from incoming `[x,y,z,yaw]` groups.
+The mission then routes accepted candidates through `auv_planner_reference/route_planning.py`, generates and checks splines, resamples/reconnects, and applies existing safe fallbacks. Optional optimization is a separate step and is disabled in the shipped profile. Wire encoding adds the camera offset and casts to Float32; the adapter reconstructs executed coordinates for the final policy collision check. The queue subtracts the same offset from incoming `[x,y,z,yaw]` groups.
 
 ## 4. Failsafe Documentation
 
@@ -126,4 +126,4 @@ When newly mapped occupancy blocks the cached active route, the planner clears i
 | `route_blacklist_cooldown_s` | `30.0` | How long an unreachable target remains banned. |
 | `trajectory_continuity_weight`| `8.0` | High values force the A* spline to align smoothly with the AUV's current momentum. |
 
-Collision inflation also includes `collision_tracking_margin=0.4 m`; configured radius plus margin is `0.7 m`. See the [complete parameter reference](../../bringup/config/README.md) for configured/default differences, declared-but-unused values and hardcoded calibration. See [validation/status](../architecture/refactoring_status.md) for tested behavior and runtime limits.
+Collision inflation also includes `collision_tracking_margin=0.4 m`; configured radius plus margin is `0.7 m`. See the [complete parameter reference](../../auv_bringup/config/README.md) for configured/default differences, declared-but-unused values and hardcoded calibration. See [validation/status](../architecture/refactoring_status.md) for tested behavior and runtime limits.

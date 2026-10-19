@@ -22,7 +22,7 @@ def git_paths(directory, arguments, prefix=Path()):
 def source_bundle():
     paths = git_paths(REPOSITORY, ['diff', '--name-only', '--', 'src'])
     paths += git_paths(REPOSITORY, ['ls-files', '--others', '--exclude-standard', 'src'])
-    vendor = Path('src/perception/perception/BGNet')
+    vendor = Path('src/auv_stereo_depth/auv_stereo_depth/BGNet')
     paths += git_paths(REPOSITORY / vendor, ['diff', '--name-only'], vendor)
     paths += git_paths(REPOSITORY / vendor, ['ls-files', '--others', '--exclude-standard'], vendor)
     selected = []

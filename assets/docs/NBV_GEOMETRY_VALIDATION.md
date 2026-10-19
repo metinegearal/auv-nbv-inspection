@@ -30,6 +30,6 @@ Input: existing `results/final_map_ros2.bt` and the last pose in `results/benchm
 
 - 65 Python regression tests passed: geometry selection, scoring, route budgets, exact collision traversal, coordinate transforms, float32 transport, spline fallback, diagnostics, and motion continuity.
 - Isolated ROS test using the actual C++ nodes passed: full 3D completion, stale acknowledgement rejection, cancellation, and remaining idle until a new route.
-- `motion_control`, `python_planner`, and `bringup` built successfully. Restart the nodes to use the changes; planner startup creates a fresh map.
+- `auv_motion_control`, `auv_planner_reference`, and `auv_bringup` built successfully. Restart the nodes to use the changes; planner startup creates a fresh map.
 
 No full simulator mission has been rerun. These checks establish behavior against known occupancy; they do not verify physical tracking/overshoot or protection against unmapped obstacles. Camera placement at future viewpoints assumes a level vehicle, and clearance still depends on the configured vehicle radius and tracking margin.

@@ -1,6 +1,6 @@
 # Finding the filter that removes all NBVs
 
-Verbose diagnostics are enabled in `src/bringup/config/params.yaml`:
+Verbose diagnostics are enabled in `src/auv_bringup/config/params.yaml`:
 
 ```yaml
 planner_node:
@@ -9,7 +9,7 @@ planner_node:
     results_dir: results
 ```
 
-Restart the planner after changing this setting. The updated `python_planner`, `benchmark_evaluator`, and `bringup` packages have been built. Logging does not change filter thresholds, blacklist behavior, candidate scoring, or route selection.
+Restart the planner after changing this setting. The updated `auv_planner_reference`, `auv_benchmark`, and `auv_bringup` packages have been built. Logging does not change filter thresholds, blacklist behavior, candidate scoring, or route selection.
 
 ## Where to look
 

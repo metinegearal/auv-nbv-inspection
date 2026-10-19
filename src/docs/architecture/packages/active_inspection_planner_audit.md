@@ -1,4 +1,4 @@
-# Package Architecture Audit: active_inspection_planner
+# Package Architecture Audit: auv_inspection_planner
 
 ## Current Metrics
 
@@ -8,19 +8,19 @@
 - Distance (D): 1.000*
 - Status: Zone of Pain*
 
-Scope: Separate C++ planner executable; not selected by the current bringup launch. Includes mapping, viewpoint selection, A* and spline generation. Its isolated package metric does not describe its extensive framework coupling.
+Scope: Separate C++ planner executable; not selected by the current auv_bringup launch. Includes mapping, viewpoint selection, A* and spline generation. Its isolated package metric does not describe its extensive framework coupling.
 
 Counts use the observed source/deployment graph, not ROS topic flow. See [Phase 1 definitions and denominator conventions](../phase_1_topology.md#metric-definitions-and-counting-rules). An asterisk denotes a mathematically undefined denominator replaced by zero only for display; the resulting D/status is conditional. Classification alone is not a violation. All file paths below are relative to `NBV_paper_ros2/src`.
 
 ## Violations Found
 | ID | Rule Broken | File & Line / Symbol | Concrete Issue | Actor / Architectural Impact |
 |---|---|---|---|---|
-| <a id="v-01"></a>V-01 | SRP / DIP | `active_inspection_planner/src/realtime_stereo_mapper.hpp:26` / `RealTimeStereoMapper` | **Critical.** One class owns map insertion and storage, camera projection, frontier selection, route ordering and trajectory smoothing; its public process_frame API takes cv::Mat and private state is a concrete ColorOcTree (lines 30, 51). | Mapping/backend maintainers and mission researchers change the same class; policy cannot be exercised independently of mapping/image libraries. |
-| <a id="v-02"></a>V-02 | DIP | `active_inspection_planner/src/realtime_stereo_mapper.cpp:119` / `generate_candidate_viewpoints` | **Moderate.** Viewpoint policy traverses concrete OctoMap leaves at line 134 and builds PCL search structures; map access has no policy-owned query contract. | A map representation change propagates into utility scoring and candidate planning. |
-| <a id="v-03"></a>V-03 | SRP / DIP | `active_inspection_planner/src/realtime_stereo_mapper.cpp:112` / `save_map` | **Moderate.** The mapping/planning object also writes the on-disk map and reports through stdout; process_frame embeds camera mount calibration at line 73. | Persistence and vehicle-calibration changes share a compilation unit with mission policy. |
-| <a id="v-04"></a>V-04 | SRP / DIP | `active_inspection_planner/src/nbv_utility_node.cpp:15` / `NBVUtilityNode` | **Moderate.** ROS callbacks and timer implement mission progress/termination and map-save behavior while directly constructing RealTimeStereoMapper at line 31. | Mission-policy tests require framework lifecycle or extracted methods; middleware integration and mission research share ownership. |
-| <a id="v-05"></a>V-05 | CCP / CRP | `active_inspection_planner/CMakeLists.txt:21` / `nbv_utility_node target` | **Moderate.** Mapper, route search and ROS entry point are compiled as one executable with no separately reusable policy target. | Search-only reuse inherits the mapping/ROS component release; backend and algorithm changes travel together. |
-| <a id="v-06"></a>V-06 | REP (dependency metadata) | `active_inspection_planner/package.xml:11` / `dependency declarations` | **Moderate.** Manifest omits directly used rclcpp, sensor_msgs, std_msgs, nav_msgs, Eigen and PCL dependencies; compare CMakeLists.txt:14 and nbv_utility_node.cpp:1. | Build/release consumers cannot reconstruct the component dependency closure from its manifest. This is release-contract evidence, not a claim about historical versioning. |
+| <a id="v-01"></a>V-01 | SRP / DIP | `auv_inspection_planner/src/realtime_stereo_mapper.hpp:26` / `RealTimeStereoMapper` | **Critical.** One class owns map insertion and storage, camera projection, frontier selection, route ordering and trajectory smoothing; its public process_frame API takes cv::Mat and private state is a concrete ColorOcTree (lines 30, 51). | Mapping/backend maintainers and mission researchers change the same class; policy cannot be exercised independently of mapping/image libraries. |
+| <a id="v-02"></a>V-02 | DIP | `auv_inspection_planner/src/realtime_stereo_mapper.cpp:119` / `generate_candidate_viewpoints` | **Moderate.** Viewpoint policy traverses concrete OctoMap leaves at line 134 and builds PCL search structures; map access has no policy-owned query contract. | A map representation change propagates into utility scoring and candidate planning. |
+| <a id="v-03"></a>V-03 | SRP / DIP | `auv_inspection_planner/src/realtime_stereo_mapper.cpp:112` / `save_map` | **Moderate.** The mapping/planning object also writes the on-disk map and reports through stdout; process_frame embeds camera mount calibration at line 73. | Persistence and vehicle-calibration changes share a compilation unit with mission policy. |
+| <a id="v-04"></a>V-04 | SRP / DIP | `auv_inspection_planner/src/nbv_utility_node.cpp:15` / `NBVUtilityNode` | **Moderate.** ROS callbacks and timer implement mission progress/termination and map-save behavior while directly constructing RealTimeStereoMapper at line 31. | Mission-policy tests require framework lifecycle or extracted methods; middleware integration and mission research share ownership. |
+| <a id="v-05"></a>V-05 | CCP / CRP | `auv_inspection_planner/CMakeLists.txt:21` / `nbv_utility_node target` | **Moderate.** Mapper, route search and ROS entry point are compiled as one executable with no separately reusable policy target. | Search-only reuse inherits the mapping/ROS component release; backend and algorithm changes travel together. |
+| <a id="v-06"></a>V-06 | REP (dependency metadata) | `auv_inspection_planner/package.xml:11` / `dependency declarations` | **Moderate.** Manifest omits directly used rclcpp, sensor_msgs, std_msgs, nav_msgs, Eigen and PCL dependencies; compare CMakeLists.txt:14 and nbv_utility_node.cpp:1. | Build/release consumers cannot reconstruct the component dependency closure from its manifest. This is release-contract evidence, not a claim about historical versioning. |
 
 ## Proposed Structural Boundary
 - Interfaces to extract: `MapReader`, `MapWriter`, `MapSnapshotStore`, `CandidateSelector`, `RouteSearch`, `TrajectoryOutput`, `MissionTelemetry`; each role has a narrow pure virtual boundary using value types.
@@ -90,20 +90,20 @@ Actor labels are inferred responsibilities, not verified organizational roles. S
 
 | File | Current defined classes / top-level functions | Ideal placement / diagnostic disposition |
 |---|---|---|
-| `active_inspection_planner/CMakeLists.txt` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `active_inspection_planner/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `active_inspection_planner/src/nbv_utility_node.cpp` | `NBVUtilityNode:15` | ROS entry adapter plus extracted mission lifecycle use case. |
-| `active_inspection_planner/src/realtime_stereo_mapper.cpp` | No classes/top-level Python functions | Split projection/map adapter, candidate/route use cases, spline math and persistence. |
-| `active_inspection_planner/src/realtime_stereo_mapper.hpp` | `MapperConfig:13`; `RealTimeStereoMapper:26` | Separate value configuration, narrow map/query contracts, and concrete backend header. |
-| `active_inspection_planner/src/search_algo.cpp` | `AStarNode:5` | A-star and visibility entity/use-case math; keep IO/debug outside core. |
-| `active_inspection_planner/src/search_algo.hpp` | `VoxelIdx:12`; `VoxelHash:17`; `SearchAlgo:25` | Value structs plus search operation contract; keep IO-free. |
+| `auv_inspection_planner/CMakeLists.txt` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_inspection_planner/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_inspection_planner/src/nbv_utility_node.cpp` | `NBVUtilityNode:15` | ROS entry adapter plus extracted mission lifecycle use case. |
+| `auv_inspection_planner/src/realtime_stereo_mapper.cpp` | No classes/top-level Python functions | Split projection/map adapter, candidate/route use cases, spline math and persistence. |
+| `auv_inspection_planner/src/realtime_stereo_mapper.hpp` | `MapperConfig:13`; `RealTimeStereoMapper:26` | Separate value configuration, narrow map/query contracts, and concrete backend header. |
+| `auv_inspection_planner/src/search_algo.cpp` | `AStarNode:5` | A-star and visibility entity/use-case math; keep IO/debug outside core. |
+| `auv_inspection_planner/src/search_algo.hpp` | `VoxelIdx:12`; `VoxelHash:17`; `SearchAlgo:25` | Value structs plus search operation contract; keep IO-free. |
 
 ## Class Counting Evidence
 
-- `active_inspection_planner/src/nbv_utility_node.cpp`: `NBVUtilityNode` (line 15).
-- `active_inspection_planner/src/realtime_stereo_mapper.hpp`: `MapperConfig` (line 13), `RealTimeStereoMapper` (line 26).
-- `active_inspection_planner/src/search_algo.cpp`: `AStarNode` (line 5).
-- `active_inspection_planner/src/search_algo.hpp`: `VoxelIdx` (line 12), `VoxelHash` (line 17), `SearchAlgo` (line 25).
+- `auv_inspection_planner/src/nbv_utility_node.cpp`: `NBVUtilityNode` (line 15).
+- `auv_inspection_planner/src/realtime_stereo_mapper.hpp`: `MapperConfig` (line 13), `RealTimeStereoMapper` (line 26).
+- `auv_inspection_planner/src/search_algo.cpp`: `AStarNode` (line 5).
+- `auv_inspection_planner/src/search_algo.hpp`: `VoxelIdx` (line 12), `VoxelHash` (line 17), `SearchAlgo` (line 25).
 
 ## Function and Class Interaction Detail
 

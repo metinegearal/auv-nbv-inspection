@@ -11,8 +11,8 @@
 #ifdef ORIGINAL_MAPPER
 #include "realtime_stereo_mapper.hpp"
 #else
-#include "active_inspection_planner/use_cases/mapping.hpp"
-#include "active_inspection_planner/adapters/maps.hpp"
+#include "auv_inspection_planner/use_cases/mapping.hpp"
+#include "auv_inspection_planner/adapters/maps.hpp"
 struct QuietDiagnostics final : inspection::Diagnostics {
   void text(const std::string&,bool,bool) override {}
   void info(const std::string&) override {}

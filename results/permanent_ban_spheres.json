@@ -3,5 +3,39 @@
   "coordinate_frame": "map",
   "scope": "mission",
   "source_log": "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/planner_nbv_filters.jsonl",
-  "spheres": []
+  "spheres": [
+    {
+      "center": [
+        360.5588210176896,
+        826.5529418960214,
+        -294.0176470573334
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1017,
+      "frame_id": 2424
+    },
+    {
+      "center": [
+        357.5555528443721,
+        828.966668702662,
+        -295.17777777628766
+      ],
+      "radius_m": 1.0,
+      "reason": "all_nbv_rays_collide",
+      "iteration": 1086,
+      "frame_id": 2718
+    },
+    {
+      "center": [
+        357.8200103774667,
+        828.5000000014901,
+        -297.07999877780674
+      ],
+      "radius_m": 0.5,
+      "reason": "attempt_budget_exhausted",
+      "iteration": 1540,
+      "frame_id": 5077
+    }
+  ]
 }

@@ -1,7 +1,7 @@
-# `sim_bridge` Clean Architecture Documentation
+# `auv_sim_bridge` Clean Architecture Documentation
 
 ## Overview
-The `sim_bridge` package acts as the translation layer between the proprietary HoloOcean simulator and the ROS 2 AUV software stack. 
+The `auv_sim_bridge` package acts as the translation layer between the proprietary HoloOcean simulator and the ROS 2 AUV software stack.
 
 Historically, this package relied on a monolithic ROS 2 Node (`HoloOceanROS2Bridge`) that directly managed the simulator lifecycle, computed environmental physics, parsed raw sensor dictionaries, and published ROS messages. 
 
@@ -78,7 +78,7 @@ Code here is allowed to import `rclpy`, `numpy`, `cv2`, and `holoocean`.
 
 ## The Composition Root
 
-**`sim_bridge/holoocean_node.py`**
+**`auv_sim_bridge/holoocean_node.py`**
 
 The entry point file is now strictly a **Composition Root**. The `HoloOceanROS2Bridge` class no longer contains simulation math or publishing logic. Its only responsibilities are:
 1.  Initializing the ROS 2 Node.
@@ -87,4 +87,4 @@ The entry point file is now strictly a **Composition Root**. The `HoloOceanROS2B
 4.  Wiring the Adapters into the Use Case (`SimulationRunner`).
 5.  Starting the execution loop.
 
-`run()` begins after construction in `main`, preserving command/step order without a blocking constructor. Scenario JSON loading and `holoocean.make` are in `adapters/holoocean.py`. Camera metadata and message conversions remain in `RosSensorOutputs`. See the [parameter reference](../../bringup/config/README.md) and [validation report](../architecture/refactoring_status.md).
+`run()` begins after construction in `main`, preserving command/step order without a blocking constructor. Scenario JSON loading and `holoocean.make` are in `adapters/holoocean.py`. Camera metadata and message conversions remain in `RosSensorOutputs`. See the [parameter reference](../../auv_bringup/config/README.md) and [validation report](../architecture/refactoring_status.md).

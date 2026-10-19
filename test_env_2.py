@@ -19,19 +19,19 @@ from scipy.spatial import KDTree
 import pyoctomap as octomap
 
 PROJECT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(PROJECT_DIR / "src" / "python_planner"))
-sys.path.insert(0, str(PROJECT_DIR / "src" / "benchmark_evaluator"))
-from benchmark_evaluator.adapters.permanent_bans import (
+sys.path.insert(0, str(PROJECT_DIR / "src" / "auv_planner_reference"))
+sys.path.insert(0, str(PROJECT_DIR / "src" / "auv_benchmark"))
+from auv_benchmark.adapters.permanent_bans import (
     BAN_SPHERES_FILENAME, PermanentBanRecorder, load_ban_spheres, target_is_banned,
 )
-from python_planner.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
-from python_planner.domain.seabed import SeabedEstimate
-from python_planner.use_cases.nbv import (
+from auv_planner_reference.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
+from auv_planner_reference.domain.seabed import SeabedEstimate
+from auv_planner_reference.use_cases.nbv import (
     calculate_pca_complexity, detect_frontiers, cluster_frontiers,
     generate_cone_viewpoints, evaluate_viewpoint, calculate_kinematic_cost,
     normalize_array, select_upward_view_axis,
 )
-from python_planner.route_planning import (
+from auv_planner_reference.route_planning import (
     inflate_occupied, plan_multi_waypoint_route, generate_smooth_trajectory,
     resample_trajectory_by_distance, path_is_collision_free,
 )
@@ -391,7 +391,7 @@ def main():
         print("No NBV candidates remain after coverage and gain filtering.")
 
     if args.future_trajectory:
-        print("Calculating future trajectory with python_planner...")
+        print("Calculating future trajectory with auv_planner_reference...")
         future = calculate_future_trajectory(
             auv_position, yaws[-1], ranked, occupied_points, resolution)
         if len(future) > 1:
