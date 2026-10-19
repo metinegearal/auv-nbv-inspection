@@ -7,6 +7,7 @@ import numpy as np
 from auv_contracts.ports import (OccupancyMap, MissionTelemetry, TextSink,
     Diagnostics, Clock, TrajectoryOutput, CompletionOutput)
 from auv_contracts.diagnostics import json_safe
+from ..domain.seabed import SeabedEstimate
 from ..route_planning import (generate_smooth_trajectory, inflate_occupied,
     path_is_collision_free, plan_multi_waypoint_route,
     resample_trajectory_by_distance, reconnect_trajectory)
@@ -56,6 +57,8 @@ class InspectionMission:
         self.collision_check_spacing_factor = config.collision_check_spacing_factor
         self.collision_radius = config.collision_radius
         self.collision_tracking_margin = config.collision_tracking_margin
+        self.route_stall_timeout_s = config.route_stall_timeout_s
+        self.route_stall_min_progress_m = config.route_stall_min_progress_m
         self.depth_scale = config.depth_scale
         self.depth_stride = config.depth_stride
         self.frame_period = config.frame_period
@@ -63,9 +66,11 @@ class InspectionMission:
         self.max_depth = config.max_depth
         self.min_depth = config.min_depth
         self.min_utility = config.min_utility
+        self.route_max_candidates = config.route_max_candidates
         self.motion_cost_parameters = config.motion_cost_parameters
         self.nbv_filter_logging = config.nbv_filter_logging
         self.nbv_parameters = config.nbv_parameters
+        self.seabed_estimate = SeabedEstimate(config.resolution)
         self.optimize_motion = config.optimize_motion
         self.optimizer_max_deviation = config.optimizer_max_deviation
         self.optimizer_max_iterations = config.optimizer_max_iterations
@@ -103,6 +108,9 @@ class InspectionMission:
         self.finished_mapping = False
         self.octree = occupancy_map
         self.active_trajectory = np.empty((0, 4), dtype=np.float64)
+        self._route_progress_position = None
+        self._route_progress_time = None
+        self._active_route_failure_reason = None
         self.camera_offset = np.array([0.35, 0.1125 + 0.275, -0.5])
         self.force_replan = False
         self.visited_targets = []
@@ -301,14 +309,6 @@ class InspectionMission:
         self._log_nbv_filter('depth_point_cap', before_point_cap,
                              len(points), {'limit': 4000})
 
-        if self.use_incremental_map_cache:
-            voxel_indices = np.floor(
-                points / self.resolution).astype(np.int32)
-            new_voxels = set(map(tuple, voxel_indices.tolist()))
-            new_voxels.difference_update(self.occupied_voxels)
-            self.occupied_voxels.update(new_voxels)
-            self.pending_occupied_voxels.update(new_voxels)
-
         sensor_origin = self._depth_sensor_origin
         self.octree.insertPointCloud(
             points.astype(np.float64),
@@ -337,14 +337,7 @@ class InspectionMission:
 
 
     def _occupied_points(self):
-        """Extract occupied metric points from the persistent OctoMap."""
-        if self.use_incremental_map_cache:
-            if not self.occupied_voxels:
-                return np.empty((0, 3), dtype=np.float64)
-            return (
-                (np.asarray(tuple(self.occupied_voxels), dtype=np.float64) + 0.5)
-                * self.resolution)
-
+        """Read current OctoMap occupancy, including occupied-to-free changes."""
         extracted = self.octree.extractPointCloud()
         points = np.asarray(extracted[0], dtype=np.float64)
         if points.size == 0:
@@ -394,6 +387,8 @@ class InspectionMission:
             return False
         valid_candidates.sort(key=lambda candidate: candidate['utility'], reverse=True)
 
+        valid_candidates = valid_candidates[:self.route_max_candidates]
+
         route_candidates = [
             (vehicle_viewpoint(np.asarray(candidate['position'], dtype=np.float64),
                                np.asarray(candidate['target'], dtype=np.float64), self.camera_offset),
@@ -412,7 +407,7 @@ class InspectionMission:
         if len(recent_positions) > 64:
             indices = np.linspace(0, len(recent_positions) - 1, 64).astype(int)
             recent_positions = [recent_positions[index] for index in indices]
-        route, targets = plan_multi_waypoint_route(
+        route, targets, reason = plan_multi_waypoint_route(
             position,
             route_candidates,
             occupied,
@@ -435,27 +430,45 @@ class InspectionMission:
                              {'route_points': len(route), 'collision_free': route_safe,
                               'collision_voxels': len(occupied),
                               'resolution': self.resolution,
-                              'spacing_factor': self.collision_check_spacing_factor})
+                              'spacing_factor': self.collision_check_spacing_factor,
+                              'reason': reason if len(route) == 0 else
+                              ('success' if route_safe else 'route_collision')})
         if not route_safe:
-            self._plan_failure_reason = 'astar_removed_all' if len(route) == 0 else 'route_collision'
-            self._failed_route_target = np.copy(valid_candidates[0]['target'])
-            self.diagnostics.warning('A* produced no collision-free route')
+            self._plan_failure_reason = reason if len(route) == 0 else 'route_collision'
+            if self._plan_failure_reason == 'start_occupied':
+                # This failure is local to the vehicle, not the destination.
+                # Retry without blacklisting or counting an exhausted-frontier strike.
+                self.force_replan = True
+            else:
+                self._failed_route_target = np.copy(valid_candidates[0]['target'])
+            self.diagnostics.warning(f'A* route failed. Reason: {self._plan_failure_reason}')
             return False
 
         trajectory_started = self.clock.perf_counter()
-        route_options = [('spline', route, targets)]
+        route_options = [('spline', route, targets), ('linear_fallback', route, targets)]
         target_changes = np.flatnonzero(np.any(targets != targets[0], axis=1))
         if len(target_changes) and target_changes[0] >= 4:
             first_end = int(target_changes[0])
-            route_options.append(('first_target_spline', route[:first_end], targets[:first_end]))
+            route_options.insert(1, ('first_target_spline', route[:first_end], targets[:first_end]))
         safe_options = []
-        # A voxel polyline is not a dynamically validated trajectory for this controller.
         for option_name, option_route, option_targets in route_options:
-            option = generate_smooth_trajectory(
-                option_route, option_targets,
-                num_points=int(self.trajectory_points),
-                smoothing=float(self.spline_smoothing),
-                sampling_spacing=float(self.waypoint_spacing))
+            if option_name == 'linear_fallback':
+                route_yaw = np.unwrap(np.arctan2(
+                    option_targets[:, 1] - option_route[:, 1],
+                    option_targets[:, 0] - option_route[:, 0]))
+                raw_option = np.column_stack((option_route, route_yaw))
+                # Resample each leg independently to retain every A* corner.
+                # A global point cap can replace a detour with an unsafe chord.
+                legs = [resample_trajectory_by_distance(
+                    raw_option[index:index + 2], float(self.waypoint_spacing))[:-1]
+                    for index in range(len(raw_option) - 1)]
+                option = np.vstack([*legs, raw_option[-1:]])
+            else:
+                option = generate_smooth_trajectory(
+                    option_route, option_targets,
+                    num_points=int(self.trajectory_points),
+                    smoothing=float(self.spline_smoothing),
+                    sampling_spacing=float(self.waypoint_spacing))
             if len(option) == 0:
                 self._log_nbv_filter('trajectory_option', 0, 0,
                                      {'option': option_name, 'reason': 'empty_trajectory',
@@ -467,9 +480,10 @@ class InspectionMission:
             if self.optimize_motion:
                 option[:, 3] = np.unwrap(np.r_[yaw, option[:, 3]])[1:]
                 option[0, 3] = yaw
-            option = resample_trajectory_by_distance(
-                option, float(self.waypoint_spacing),
-                max_points=int(self.trajectory_points))
+            if option_name != 'linear_fallback':
+                option = resample_trajectory_by_distance(
+                    option, float(self.waypoint_spacing),
+                    max_points=int(self.trajectory_points))
             option_safe = path_is_collision_free(
                     option[:, :3], occupied, self.resolution,
                     self.collision_check_spacing_factor)
@@ -489,8 +503,7 @@ class InspectionMission:
             # the highest-utility candidate. Its prefix spline also failed.
             self._failed_route_target = np.copy(targets[0])
             self.diagnostics.warning(
-                'Resampled spline intersects the collision boundary; '
-                'route rejected')
+                'No collision-free spline or linear fallback; route rejected')
             self.telemetry.record_stage(
                 'trajectory_generation_and_validation',
                 (self.clock.perf_counter() - trajectory_started) * 1000.0,
@@ -600,24 +613,67 @@ class InspectionMission:
 
 
     def _active_trajectory_is_safe(self, occupied):
-        """Check the currently published route against the updated map."""
+        """Check the remaining route, current entry, and positional progress."""
+        self._active_route_failure_reason = None
         if len(self.active_trajectory) == 0:
             return True
-        return path_is_collision_free(
-            self.active_trajectory[:, :3],
+        position, yaw, _ = self._motion_snapshot()
+        remaining = reconnect_trajectory(
+            self.active_trajectory, position, yaw, occupied, self.resolution,
+            self.collision_check_spacing_factor)
+        if len(remaining) == 0:
+            self._active_route_failure_reason = 'unsafe_current_route_entry'
+            return False
+        safe = path_is_collision_free(
+            remaining[:, :3],
             occupied,
             self.resolution,
             self.collision_check_spacing_factor)
+        if not safe:
+            self._active_route_failure_reason = 'new_obstacle_on_active_route'
+            return False
+        if self._route_is_stalled(position, remaining):
+            self._active_route_failure_reason = 'active_route_stalled'
+            return False
+        return True
+
+
+    def _route_is_stalled(self, position, remaining):
+        """Detect a stationary unfinished vehicle; do not infer a new obstacle."""
+        now = self.clock.perf_counter()
+        anchor = getattr(self, '_route_progress_position', None)
+        since = getattr(self, '_route_progress_time', None)
+        progress = getattr(self, 'route_stall_min_progress_m', 0.15)
+        if (anchor is None or since is None or now < since
+                or np.linalg.norm(position - anchor) >= progress):
+            self._route_progress_position = np.asarray(position).copy()
+            self._route_progress_time = now
+            return False
+        if np.linalg.norm(position - remaining[-1, :3]) <= getattr(self, 'visit_radius', 0.25):
+            return False
+        timeout = getattr(self, 'route_stall_timeout_s', 10.0)
+        if now - since < timeout:
+            return False
+        self._log_nbv_filter('route_progress_stalled', len(remaining), 0,
+                             {'elapsed_s': now - since,
+                              'displacement_m': np.linalg.norm(position - anchor),
+                              'minimum_progress_m': progress,
+                              'vehicle_position': position,
+                              'action': 'cancel_and_replan'})
+        return True
 
 
     def _cancel_active_trajectory(self):
         """Cancel the downstream queue as well as the planner's cached route."""
         previous_count = len(self.active_trajectory)
-        self.output.publish(())
+        self.output.publish([])
         self.active_trajectory = np.empty((0, 4), dtype=np.float64)
+        self._route_progress_position = None
+        self._route_progress_time = None
         self.selected_targets = []
         self._log_nbv_filter('trajectory_cancelled', previous_count, 0,
-                             {'reason': 'new_obstacle_on_active_route',
+                             {'reason': getattr(self, '_active_route_failure_reason', None)
+                              or 'new_obstacle_on_active_route',
                               'downstream_queue_cleared': True})
 
 
@@ -651,27 +707,26 @@ class InspectionMission:
 
         stage_started = self.clock.perf_counter()
         occupied_points = self._occupied_points()
+        estimate = getattr(self, 'seabed_estimate', None)
+        if estimate is not None and self.nbv_parameters.get('seabed_enabled', False):
+            changed = estimate.update(occupied_points)
+            self._log_nbv_filter('seabed_estimate', len(occupied_points), estimate.sample_count,
+                                 {'mean_z': estimate.mean_z,
+                                  'sample_count': estimate.sample_count,
+                                  'changed_voxels': changed,
+                                  'source': 'occupied_map' if estimate.mean_z is not None
+                                  else 'insufficient_floor_support'})
         self.telemetry.record_stage(
             'octomap_extract', (self.clock.perf_counter() - stage_started) * 1000.0,
             iteration=self.iteration, frame_id=self.depth_sequence)
         self.diagnostics.info(f'Iteration {self.iteration}: OctoMap total size = {len(occupied_points)} voxels.', throttle_duration_sec=2.0)
 
         stage_started = self.clock.perf_counter()
-        if self.use_incremental_map_cache:
-            new_voxels = self.pending_occupied_voxels
-            self.pending_occupied_voxels = set()
-            if new_voxels:
-                self.collision_voxels.update(
-                    inflate_occupied(
-                        new_voxels,
-                        self.collision_radius + self.collision_tracking_margin,
-                        self.resolution))
-            collision_voxels = self.collision_voxels
-        else:
-            occupied_indices = set(map(
-                tuple, np.floor(occupied_points / self.resolution).astype(int)))
-            collision_voxels = inflate_occupied(
-                occupied_indices, self.collision_radius + self.collision_tracking_margin, self.resolution)
+        occupied_indices = set(map(
+            tuple, np.floor(occupied_points / self.resolution).astype(int)))
+        collision_voxels = inflate_occupied(
+            occupied_indices, self.collision_radius + self.collision_tracking_margin,
+            self.resolution)
         self.telemetry.record_stage(
             'collision_inflation', (self.clock.perf_counter() - stage_started) * 1000.0,
             iteration=self.iteration, frame_id=self.depth_sequence)
@@ -679,7 +734,8 @@ class InspectionMission:
         route_blocked = not self._active_trajectory_is_safe(collision_voxels)
         if route_blocked:
             self._cancel_active_trajectory()
-            self.diagnostics.warning('🚨 Active trajectory collided with newly mapped space; forcing replan!')
+            self.diagnostics.warning(
+                f'Active trajectory cancelled ({self._active_route_failure_reason}); forcing replan!')
 
 
         arrived_at_target = False
@@ -728,6 +784,11 @@ class InspectionMission:
             heading = np.array([math.cos(nbv_yaw), math.sin(nbv_yaw), 0.0])
 
             nbv_started = self.clock.perf_counter()
+            nbv_parameters = dict(self.nbv_parameters)
+            estimate = getattr(self, 'seabed_estimate', None)
+            if estimate is not None:
+                nbv_parameters.update(seabed_estimate_z=estimate.mean_z,
+                                      seabed_sample_count=estimate.sample_count)
             try:
                 self.diagnostics.info('Calculating NBV waypoints...')
                 candidates = self.nbv_calculator(
@@ -735,7 +796,7 @@ class InspectionMission:
                     camera_position,
                     heading,
                     self.observation_history,
-                    self.nbv_parameters,
+                    nbv_parameters,
                     timing_callback=lambda stage, duration_ms:
                         self.telemetry.record_stage(
                             stage, duration_ms, iteration=self.iteration),

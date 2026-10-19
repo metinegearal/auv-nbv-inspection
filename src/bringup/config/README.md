@@ -77,6 +77,7 @@ Source: [configuration loader](../../python_planner/python_planner/domain/config
 | `replan_on_target_arrival` | `true` | `false` | Also trigger planning near a selected inspection target. |
 | `arrival_target_radius` | `2.5` | `1.5` | Distance to the selected target centroid that triggers arrival replanning; metres. |
 | `min_utility_threshold` | `0.1` | `0.005` | Keep candidate utilities at or above this threshold. |
+| `route_max_candidates` | `5` | `5` | Maximum highest-utility candidates passed to route planning after utility filtering; positive integer, read at startup. |
 | `collision_radius` | `0.3` | `0.6` | Occupancy inflation radius in metres. |
 | `collision_tracking_margin` | `0.4` | `0.4` | Additional inflation allowance in metres; added to `collision_radius`. |
 | `trajectory_points` | `300` | `300` | Requested spline sample count before later trajectory processing. |
@@ -100,7 +101,7 @@ Source: [configuration loader](../../python_planner/python_planner/domain/config
 | `spline_smoothing` | `2.0` | `2.0` | Spline smoothing factor passed to trajectory generation. |
 | `collision_check_spacing_factor` | `0.5` | `0.5` | Collision sample spacing relative to voxel resolution. |
 
-The ROS timer period is fixed at `0.5` seconds. `planning_period=100` is not a timer period: iteration progresses only after a new depth frame passes the input gates. Forced replanning still waits for those gates. Pose matching accepts the closest odometry sample only when the timestamp difference is strictly below `0.1` seconds. The current route function has no declared `route_search_time_budget_s` or `route_max_candidates` parameters; adding those YAML keys does not enable such limits.
+The ROS timer period is fixed at `0.5` seconds. `planning_period=100` is not a timer period: iteration progresses only after a new depth frame passes the input gates. Forced replanning still waits for those gates. Pose matching accepts the closest odometry sample only when the timestamp difference is strictly below `0.1` seconds. The current route function has no declared `route_search_time_budget_s` parameter; adding that YAML key does not enable such a limit.
 
 ## `planner_node`: `nbv_params.yaml`
 
@@ -109,6 +110,7 @@ Defaults: [domain/nbv_parameters.py](../../python_planner/python_planner/domain/
 | Parameter | Configured | Code default | Meaning / units |
 |---|---|---|---|
 | `nbv_z_min_target` | `-300.0` | `-3000.0` | Strict world-Z lower bound on occupied points entering NBV scoring. |
+| `nbv_exploration_radius` | `15.0` | `15.0` | Positive finite focus radius around the AUV in metres; full-cloud neighbors and obstacle context remain available. |
 | `nbv_voxel_downsample_size` | `0.25` | `0.25` | Open3D downsample voxel size in metres. |
 | `nbv_outlier_neighbors` | `15` | `15` | Statistical outlier-filter neighbor count. |
 | `nbv_outlier_std_ratio` | `1.5` | `1.5` | Statistical outlier-filter standard-deviation ratio. |

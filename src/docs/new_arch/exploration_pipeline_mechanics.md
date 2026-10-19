@@ -72,14 +72,16 @@ The policy calculates frontiers and information gain versus kinematic cost. `get
 ### Phase 1: Pre-Processing & Filtering
 *   **Z-Filter:** Keep occupied points with strict `Z > nbv_z_min_target`. The separate `z_min_target` parameter applies during map accumulation.
 *   **Voxel Downsample & Outlier Removal:** Uses `Open3D` to compress the point cloud and remove statistical noise, allowing KDTree operations to run in real-time.
-*   **Minimum cloud size:** Fewer than 40 retained points stops candidate generation.
+*   **Boundary preservation:** Statistical outlier rejection retains points with three other neighbors within `normal_radius`, preserving supported corners and sparse borders.
+*   **Minimum cloud size:** The retained cloud must satisfy `cluster_min_samples` and `frontier_min_neighbors + 1` (at least three points); there is no fixed 40-point cutoff.
 
 ### 2. PCA Complexity & Frontier Detection
-*   **PCA Complexity:** For every point, a KDTree finds $K$ neighbors. The eigenvalues of the local covariance matrix are computed. The ratio of the smallest eigenvalue to the sum of all eigenvalues determines the "complexity" (roughness) of the surface.
-*   **Frontiers:** Tangent-plane neighbor angles identify angular gaps exceeding `frontier_angle_threshold_deg` (e.g., 130°).
+*   **Focus window:** Frontier query centers are limited to cleaned surface points within `nbv_exploration_radius` of the current AUV position (default 15 m, configured in bringup's `nbv_params.yaml`). Full-cloud neighbors and original global indices are retained. An empty focus window returns no candidates; distant frontiers are deferred.
+*   **PCA Complexity:** After clustering, only clustered focus points are scored. A shared full-cloud KDTree finds $K$ neighbors for each scored point. The eigenvalues of the local covariance matrix are computed. The ratio of the smallest eigenvalue to the sum of all eigenvalues determines the "complexity" (roughness) of the surface.
+*   **Frontiers:** Tangent-plane neighbor angles identify angular gaps exceeding `frontier_angle_threshold_deg` (e.g., 130°). Neighbors are bounded by `frontier_radius` (0.5 m) and capped at `frontier_neighbors` (40), with at least `frontier_min_neighbors` (3) usable tangent directions. Normals are normalized; zero tangent projections cannot fill gaps.
 
 ### 3. Clustering
-*   Frontiers are grouped based on `cluster_fov_radius`. Clusters with fewer than `cluster_min_samples` are discarded as noise. A centroid and average normal vector are computed for each surviving cluster.
+*   Frontiers are grouped based on `cluster_fov_radius` and normal compatibility, processing dense neighborhoods first. Undersized groups do not consume their neighbors. Supported short tails may join a retained cluster if the combined patch fits its centroid's FOV radius. Remaining groups below `cluster_min_samples` are discarded. A centroid and average normal vector are computed for each surviving cluster.
 
 ### 4. Candidate Generation & Utility Scoring
 *   Viewpoints are generated in a cone around the cluster centroid based on `standoff` distance and `polar_angles_deg`.

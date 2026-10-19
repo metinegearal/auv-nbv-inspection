@@ -1,15 +1,18 @@
 import math
 from auv_contracts.ports import TrajectorySink, Clock, Diagnostics
 from ..domain.evaluation import ReportWriter, ReportSnapshot
+from .motion_response import MotionResponseEvaluation
 
 class TrajectoryEvaluation:
     def __init__(self, telemetry: TrajectorySink, writer: ReportWriter,
-                 clock: Clock, diagnostics: Diagnostics, show_reference_objects=True):
+                 clock: Clock, diagnostics: Diagnostics, show_reference_objects=True,
+                 response_options=None):
         self.telemetry = telemetry
         self.writer = writer
         self.clock = clock
         self.diagnostics = diagnostics
         self.show_reference_objects = show_reference_objects
+        self.motion_response = MotionResponseEvaluation(clock, diagnostics, **(response_options or {}))
         # State variables
         self.mission_started = False
         self.mission_finished = False
@@ -57,6 +60,7 @@ class TrajectoryEvaluation:
     def odom_callback(self, msg):
         if self.mission_finished:
             return
+        self.motion_response.odom_callback(msg)
 
         # Check if this is the first valid odometry message (not 0,0,0)
         if not self.mission_started and (abs(msg.position.x) > 0.01):
@@ -177,9 +181,11 @@ class TrajectoryEvaluation:
     def save_benchmark_data(self, total_time):
         if self.data_saved:
             return
+        self.motion_response.close('mission_finished' if self.mission_finished else 'shutdown')
         snapshot = ReportSnapshot(tuple(self.trajectory_log), tuple(self.diagnostic_log),
                                   self.total_distance, self._diagnostic_metrics(),
-                                  self.show_reference_objects)
+                                  self.show_reference_objects,
+                                  tuple(self.motion_response.records), tuple(self.motion_response.samples))
         self.writer.write(snapshot, total_time)
         self.data_saved = True
 
