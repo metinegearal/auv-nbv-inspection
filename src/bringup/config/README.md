@@ -16,13 +16,44 @@ ros2 launch bringup mapper.launch.py params_file:=/absolute/path/params.yaml nbv
 | Launch argument | Default installed resource | Consumers |
 |---|---|---|
 | `planner_implementation` | `cpp` (`python` selects the reference) | Planner package and executable selection |
-| `params_file` | `bringup/config/params.yaml` | All six launched processes |
+| `live_viewer` | `true` | Start the benchmark live map window; set `false` for headless runs. |
+| `params_file` | `bringup/config/params.yaml` | All seven launched processes, including the optional live viewer |
 | `nbv_params_file` | `bringup/config/nbv_params.yaml` | Selected inspection planner |
 | `holo_config_file` | `bringup/config/holoocean_config.json` | Bridge's `holoocean_config_path` parameter |
 
-The planner receives `[nbv_params_file, params_file]`; the main file wins when both define the same key. The bridge receives the main file and then the explicit scenario-path override. YAML keys use **launch names**: `waypoint_control_node`, `point_iterator`, `planner_node`, `run_baselines`, `depth_estimation`, and `holoocean_node`. Standalone constructors have different names for the queue (`path_planner`), planner (`nbv_utility_node`), observer (`benchmark_logger`), and depth node (`object_detector_node`); supply matching node keys or remap the name when running an executable directly.
+The planner receives `[nbv_params_file, params_file]`; the main file wins when both define the same key. The bridge receives the main file and then the explicit scenario-path override. YAML keys use **launch names**: `waypoint_control_node`, `point_iterator`, `planner_node`, `run_baselines`, `live_viewer`, `depth_estimation`, and `holoocean_node`. Standalone constructors have different names for the queue (`path_planner`), planner (`nbv_utility_node`), observer (`benchmark_logger`), and depth node (`object_detector_node`); supply matching node keys or remap the name when running an executable directly.
 
 Parameters are read at startup except `kp_yaw` and `kp_dist`, which the controller re-reads during movement. Rebuild `bringup` to refresh installed resources, then restart nodes to apply other edits. Relative result paths resolve against the launched process's working directory.
+
+### Live viewer
+
+`mapper.launch.py` starts the benchmark package's `live_viewer` by default.
+Disable its window with `live_viewer:=false`, or attach a standalone viewer using
+`ros2 launch bringup live_viewer.launch.py`. Both use the `live_viewer` YAML key.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `map_path` | `results/final_map_ros2.bt` | Match the planner's `octomap_path`; refreshed when the planner saves a snapshot. |
+| `map_poll_period_s` | `1.0` | File-change check interval; unchanged files are not decoded again. |
+| `render_hz` | `20.0` | Maximum desktop refresh rate. |
+| `voxel_size_m` | `0.2` | Display downsampling size; does not alter planner occupancy. |
+| `chunk_size_m` | `4.0` | Spatial display regions; only changed chunks are uploaded. Must be at least `voxel_size_m`. |
+| `max_chunks_per_frame` | `8` | Limit map geometry updates per frame. |
+| `point_size` | `3.0` | Map point size in pixels. |
+| `window_width`, `window_height` | `1280`, `800` | Initial window dimensions in pixels. |
+| `trajectory_topic` | `object/areaWaypoints` | Live flattened `[x,y,z,yaw]` plans; empty messages clear the route. |
+| `odometry_topic` | `holocean/odom` | Vehicle position in the map coordinate system. |
+| `completion_topic` | `/movement/finished_execution` | True clears the displayed route. |
+| `show_target_frontiers` | `true` | Show the active C++ frontier target in yellow; false also disables target-log polling. |
+| `frontier_log_path` | Empty | Defaults to `planner_nbv_filters.jsonl` beside `map_path`; requires planner filter logging. |
+| `frontier_poll_period_s` | `0.5` | Background target-log check interval; reads bounded blocks and then appended bytes. |
+| `frontier_marker_radius_m` | `0.35` | Yellow wire sphere radius around the selected frontier centroid. |
+
+The map is read on a background worker and unchanged distant regions stay
+visible. Each changed file still requires a full snapshot decode because the
+planner does not publish map deltas. Press **F** to fit the map; closing the
+window stops only this viewer. The Python environment must provide Open3D and
+`pyoctomap`, as for `test_env_2.py`.
 
 ## `waypoint_control_node`
 
