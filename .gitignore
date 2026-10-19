@@ -1,6 +1,17 @@
 build/
 install/
 log/
+build_renamed/
+install_renamed/
+log_renamed/
+# Local drafts, experiments, helper scripts and archived generated files.
+/local/
+/.pytest_cache/
+/.agents/
+/.aws/
+/.codex/
+# Legacy tools may regenerate this root-level log.
+/evaluation_parameters.txt
 __pycache__/
 *.pth
 results/*.csv
@@ -9,3 +20,7 @@ AGENTS.md
 **_dummy**
 issue.txt
 temp_**
+NEXT.md
+_dump.txt
+backlog.md
+**_old.md

@@ -1,0 +1,13 @@
+NBV Underwater Inspection with ROS 2
+Copyright 2026 metinegearal and contributors.
+
+Project-authored code and documentation are licensed under the Apache License,
+Version 2.0, except where a file or component identifies different terms.
+See LICENSE for the complete license text.
+
+Third-party components retain their original copyright and license terms.
+The Apache-2.0 declaration does not relicense vendored SciPy or nlohmann/json,
+the BGNet submodule, pretrained model weights, datasets, simulator assets or
+separately installed dependencies. See THIRD_PARTY_NOTICES.md where supplied.
+BGNet code and pretrained model permissions remain unverified; this NOTICE
+does not grant permission to redistribute those components.

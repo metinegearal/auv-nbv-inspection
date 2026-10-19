@@ -1,0 +1,284 @@
+import heapq
+
+import numpy as np
+from scipy.interpolate import splprep, splev
+
+
+def astar_3d(start_pos, goal_pos, occupied, resolution, max_steps=50000):
+    """Find a 6-connected voxel path between two metric positions."""
+    start = tuple(map(int, np.floor(start_pos / resolution)))
+    goal = tuple(map(int, np.floor(goal_pos / resolution)))
+    
+    if start in occupied:
+        return [], "start_occupied"
+    if goal in occupied:
+        return [], "goal_occupied"
+
+    goal_x, goal_y, goal_z = goal
+    initial_h = sum(abs(start[i] - goal[i]) for i in range(3))
+    open_set = [(initial_h, initial_h, start, 0)]
+    came_from = {}
+    costs = {start: 0}
+    directions = (
+        (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0),
+        (0, 0, 1), (0, 0, -1),
+    )
+
+    expansions = 0
+    while open_set and expansions < max_steps:
+        _, _, current, current_cost = heapq.heappop(open_set)
+        if current_cost != costs[current]:
+            continue
+        expansions += 1
+        if current == goal:
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            path.append(start)
+            path.reverse()
+            return [
+                (np.asarray(index, dtype=np.float64) + 0.5) * resolution
+                for index in path
+            ], "success"
+
+        x, y, z = current
+        cost = current_cost + 1
+        for dx, dy, dz in directions:
+            neighbor = (x + dx, y + dy, z + dz)
+            if neighbor in occupied:
+                continue
+            previous_cost = costs.get(neighbor)
+            if previous_cost is not None and cost >= previous_cost:
+                continue
+            came_from[neighbor] = current
+            costs[neighbor] = cost
+            h = abs(neighbor[0] - goal_x) + abs(neighbor[1] - goal_y) + abs(neighbor[2] - goal_z)
+            heapq.heappush(open_set, (cost + h, h, neighbor, cost))
+            
+    if expansions >= max_steps:
+        return [], "search_limit_reached"
+    return [], "no_connected_path"
+
+def inflate_occupied(occupied_indices, collision_radius, resolution):
+    """Inflate occupied voxels with a precomputed spherical neighborhood."""
+    if not occupied_indices:
+        return set()
+
+    radius_voxels = int(np.ceil(collision_radius / resolution))
+    offsets = [
+        (offset_x, offset_y, offset_z)
+        for offset_x in range(-radius_voxels, radius_voxels + 1)
+        for offset_y in range(-radius_voxels, radius_voxels + 1)
+        for offset_z in range(-radius_voxels, radius_voxels + 1)
+        if offset_x ** 2 + offset_y ** 2 + offset_z ** 2
+        <= radius_voxels ** 2
+    ]
+
+    inflated = set()
+    for occupied_x, occupied_y, occupied_z in occupied_indices:
+        inflated.update(
+            (occupied_x + offset_x,
+             occupied_y + offset_y,
+             occupied_z + offset_z)
+            for offset_x, offset_y, offset_z in offsets)
+    return inflated
+
+
+def path_is_collision_free(path, occupied, resolution, sample_spacing_factor=0.5):
+    """Check a metric path against occupied voxels, including segment gaps."""
+    if len(path) == 0:
+        return False
+    if not np.all(np.isfinite(path)):
+        return False
+    if tuple(np.floor(np.asarray(path[0]) / resolution).astype(int)) in occupied:
+        return False
+    for start, end in zip(path[:-1], path[1:]):
+        distance = np.linalg.norm(end - start)
+        samples = max(
+            1, int(np.ceil(distance / (resolution * sample_spacing_factor))))
+        for fraction in np.linspace(0.0, 1.0, samples + 1):
+            point = start + fraction * (end - start)
+            voxel = tuple(np.floor(point / resolution).astype(int))
+            if voxel in occupied:
+                return False
+    return True
+
+
+def reconnect_trajectory(trajectory, current_position, current_yaw, occupied,
+                         resolution, sample_spacing_factor=0.5):
+    """Reconnect a previously validated route, checking only its new entry.
+
+    Join the end of the closest segment so the vehicle never has to visit the
+    old planning origin or drive back to its projection on that segment.
+    The remaining route must already be validated against the same occupied map.
+    """
+    path = np.asarray(trajectory, dtype=np.float64)
+    position = np.asarray(current_position, dtype=np.float64)
+    if (path.ndim != 2 or path.shape[1] != 4 or len(path) == 0
+            or not np.all(np.isfinite(path))
+            or not np.all(np.isfinite(position)) or not np.isfinite(current_yaw)):
+        return np.empty((0, 4))
+    if len(path) > 1:
+        steps = np.diff(path[:, :3], axis=0)
+        squared_lengths = np.sum(steps * steps, axis=1)
+        fractions = np.clip(np.sum((position - path[:-1, :3]) * steps, axis=1)
+                            / np.maximum(squared_lengths, 1e-12), 0.0, 1.0)
+        projections = path[:-1, :3] + fractions[:, None] * steps
+        segment = int(np.argmin(np.linalg.norm(projections - position, axis=1)))
+        suffix = path[segment + 1:].copy()
+    else:
+        suffix = path.copy()
+    # Preserve required returns beyond the endpoint; only remove passed samples.
+    suffix = suffix[np.r_[True, np.linalg.norm(np.diff(suffix[:, :3], axis=0),
+                                               axis=1) > 1e-9]]
+    if np.linalg.norm(suffix[0, :3] - position) < 1e-9:
+        suffix = suffix[1:]
+    entry = np.r_[position, current_yaw]
+    result = np.vstack((entry, suffix))
+    result[:, 3] = np.unwrap(result[:, 3])
+    if not path_is_collision_free(result[:2, :3], occupied, resolution,
+                                  sample_spacing_factor):
+        return np.empty((0, 4))
+    return result
+
+
+def plan_multi_waypoint_route(current_position, candidates, occupied,
+                              resolution, astar_max_steps=50000,
+                              current_velocity=None, reversal_weight=2.0,
+                              candidate_utilities=None):
+    utilities = (np.zeros(len(candidates)) if candidate_utilities is None
+                 else np.asarray(candidate_utilities, dtype=float))
+    if not candidates:
+        return np.empty((0, 3)), np.empty((0, 3)), "no_candidates"
+
+    remaining = list(zip(candidates, utilities))
+    full_path = []
+    target_tracking = []
+    start = np.asarray(current_position, dtype=np.float64)
+    direction = (np.zeros(3) if current_velocity is None
+                 else np.asarray(current_velocity, dtype=np.float64))
+    if np.linalg.norm(direction) < 0.05:
+        direction = np.zeros(3)
+        
+    last_failure_reason = "no_candidates"
+
+    while remaining:
+        scores = []
+        for (viewpoint, _), utility in remaining:
+            delta = viewpoint - start
+            distance = np.linalg.norm(delta)
+            alignment = np.dot(delta, direction) / max(
+                distance * np.linalg.norm(direction), 1e-9)
+            travel_cost = distance + reversal_weight * max(0.0, -alignment)
+            scores.append((-utility, travel_cost))
+            
+        index = min(range(len(remaining)), key=scores.__getitem__)
+        (viewpoint, target), _ = remaining.pop(index)
+        
+        segment, reason = astar_3d(
+            start, viewpoint, occupied, resolution, max_steps=astar_max_steps)
+            
+        if not segment:
+            if reason == "start_occupied" and len(full_path) == 0:
+                return np.empty((0, 3)), np.empty((0, 3)), "start_occupied"
+            last_failure_reason = reason
+            continue
+
+        segment = np.asarray(segment)
+        if len(segment) == 1:
+            segment = np.vstack((start, viewpoint))
+        else:
+            segment[0] = start
+            segment[-1] = viewpoint
+            
+        keep = np.concatenate(([True], np.linalg.norm(np.diff(segment, axis=0), axis=1) > 1e-9))
+        segment = segment[keep]
+        
+        if not path_is_collision_free(segment, occupied, resolution):
+            last_failure_reason = "leg_validation_failed"
+            continue
+            
+        if full_path and np.allclose(full_path[-1], segment[0]):
+            segment = segment[1:]
+        full_path.extend(segment)
+        target_tracking.extend([target] * len(segment))
+        direction = viewpoint - start
+        start = viewpoint
+
+    if len(full_path) == 0:
+        return np.empty((0, 3)), np.empty((0, 3)), last_failure_reason
+    return (np.asarray(full_path, dtype=float).reshape(-1, 3),
+            np.asarray(target_tracking, dtype=float).reshape(-1, 3), "success")
+
+
+def generate_smooth_trajectory(path, targets, num_points=200, smoothing=2.0, sampling_spacing=None):
+    if len(path) == 0 or len(targets) != len(path):
+        return np.empty((0, 4))
+
+    path = np.asarray(path, dtype=np.float64)
+    targets = np.asarray(targets, dtype=np.float64)
+    keep = np.concatenate(([True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9))
+    path, targets = path[keep], targets[keep]
+    
+    if len(path) == 0:
+        return np.empty((0, 4))
+        
+    yaw = np.unwrap(np.arctan2(targets[:, 1] - path[:, 1], targets[:, 0] - path[:, 0]))
+
+    # EXPLICIT SHORT ROUTE HANDLING
+    if len(path) == 1:
+        return np.column_stack((path, yaw))
+        
+    k = min(3, len(path) - 1)  # k=1 (straight), k=2 (quadratic), k=3 (cubic)
+    
+    distance = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]
+    parameters = distance / distance[-1]
+    try:
+        spline, _ = splprep([path[:, 0], path[:, 1], path[:, 2]], u=parameters, s=smoothing, k=k)
+    except (ValueError, TypeError):
+        return np.empty((0, 4))
+
+    sample_count = int(num_points)
+    if sampling_spacing is not None and sampling_spacing > 0.0:
+        route_length = distance[-1]
+        sample_count = max(sample_count, int(np.ceil(route_length / sampling_spacing * 10.0)) + 1)
+
+    samples = np.linspace(0.0, 1.0, sample_count)
+    values = splev(samples, spline)
+    smooth_yaw = np.interp(samples, parameters, yaw)
+    return np.column_stack(values + [smooth_yaw])
+
+
+def resample_trajectory_by_distance(trajectory, spacing, max_points=None):
+    """Sample by distance, then optionally limit the result point count."""
+    trajectory = np.asarray(trajectory, dtype=np.float64)
+    if len(trajectory) < 2 or spacing <= 0.0:
+        return trajectory
+
+    positions = trajectory[:, :3]
+    segment_lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+    keep = np.concatenate(([True], segment_lengths > 1e-9))
+    trajectory = trajectory[keep]
+    positions = trajectory[:, :3]
+    segment_lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+    cumulative = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    total_length = cumulative[-1]
+    if total_length <= 1e-9:
+        return trajectory[[0]].copy()
+
+    distances = np.arange(0.0, total_length, spacing)
+    if distances[-1] < total_length:
+        distances = np.append(distances, total_length)
+
+    sampled_positions = np.column_stack([
+        np.interp(distances, cumulative, positions[:, axis])
+        for axis in range(3)
+    ])
+    unwrapped_yaw = np.unwrap(trajectory[:, 3])
+    sampled_yaw = np.interp(distances, cumulative, unwrapped_yaw)
+    result = np.column_stack((sampled_positions, sampled_yaw))
+    if max_points is not None and len(result) > max_points:
+        indices = np.linspace(0, len(result) - 1, int(max_points)).round()
+        result = result[np.unique(indices).astype(int)]
+    return result

@@ -1,0 +1,59 @@
+# NBV tuning only. mapper.launch.py loads this for planner_node automatically.
+planner_node:
+  ros__parameters:
+    # World-space target filtering and point-cloud preprocessing
+    nbv_z_min_target: -300.0
+    # Refresh frontier geometry within this distance of the camera (meters).
+    # C++ retains discovered distant clusters and rescores them globally.
+    nbv_exploration_radius: 10.0
+    nbv_voxel_downsample_size: 0.25
+    nbv_outlier_neighbors: 15
+    nbv_outlier_std_ratio: 1.5
+
+    # Surface geometry estimation and frontier detection
+    nbv_pca_neighbors: 20
+    nbv_normal_radius: 0.4
+    nbv_normal_max_neighbors: 30
+    nbv_frontier_neighbors: 40
+    # Bound support locally so neighbors across small holes cannot hide edges.
+    nbv_frontier_radius: 0.5
+    nbv_frontier_min_neighbors: 3
+    nbv_frontier_angle_threshold_deg: 90.0
+
+    # Frontier clustering
+    nbv_cluster_fov_radius: 1.0
+    nbv_cluster_max_angle_deg: 45.0
+    nbv_cluster_min_samples: 5
+
+    # Viewpoint sampling and observation history
+    nbv_standoff: 2.0
+    nbv_polar_angles_deg: [15.0, 30.0]
+    nbv_azimuth_steps: 8
+    # Central axis: fixed +45 degree elevation; scan yaw for occupied-map clearance.
+    # Separate from the azimuth sampling of the 15/30 degree candidate cones.
+    nbv_view_axis_azimuth_steps: 36
+    nbv_visited_min_distance: 0.1
+    nbv_visited_max_distance: 3.5
+    nbv_visited_yaw_threshold_deg: 40.0
+
+    # Gain: sum(cos(incidence) * (1 + complexity_weight * PCA_complexity))
+    nbv_complexity_weight: 30.0
+    nbv_min_raw_gain: 0.5
+
+    # Automatically infer floor height from broad horizontal map support.
+    nbv_seabed_enabled: true
+    # Gain multiplier = 1 - strength * exp(-height_above_floor / decay_height).
+    nbv_seabed_decay_height: 0.5
+    nbv_seabed_penalty_strength: 0.95
+
+    # Favor shorter travel more strongly relative to turning and obstacle proximity.
+    nbv_distance_weight: 3.0
+    nbv_rotation_weight: 0.5
+    nbv_collision_weight: 2.0
+    nbv_collision_distance_threshold: 0.8
+    nbv_collision_distance_offset: 0.2
+
+    # Utility = gain_weight * normalized_gain - cost_weight * normalized_cost.
+    # Balance gain and cost after normalization so distance can affect selection.
+    nbv_utility_gain_weight: 1.5
+    nbv_utility_cost_weight: 1.5

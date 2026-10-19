@@ -1,4 +1,4 @@
-# Package Architecture Audit: sim_bridge
+# Package Architecture Audit: auv_sim_bridge
 
 ## Current Metrics
 
@@ -15,11 +15,11 @@ Counts use the observed source/deployment graph, not ROS topic flow. See [Phase 
 ## Violations Found
 | ID | Rule Broken | File & Line / Symbol | Concrete Issue | Actor / Architectural Impact |
 |---|---|---|---|---|
-| <a id="v-01"></a>V-01 | SRP | `sim_bridge/sim_bridge/holoocean_node.py:59` / `HoloOceanROS2Bridge` | **Moderate.** One class loads scenario JSON, initializes middleware, owns command state, steps the simulator and encodes every sensor; construction calls the blocking loop at line 136. | Simulator lifecycle, deployment configuration and ROS sensor-schema actors change the same class; construction and use cannot be tested independently. |
-| <a id="v-02"></a>V-02 | OCP | `sim_bridge/sim_bridge/holoocean_node.py:478` / `sensor dispatch in _run_holoocean_loop` | **Moderate.** The loop enumerates sensor names and per-sensor try/publish branches; a new sensor requires editing the central stepping loop as well as implementing conversion. | Sensor extension changes simulator scheduling infrastructure; a registry of sensor adapters would localize those changes. |
-| <a id="v-03"></a>V-03 | CCP / DIP (protocol boundary) | `sim_bridge/sim_bridge/holoocean_node.py:122` / `command vector / cmd_callback` | **Moderate.** The shared default eight-element command and Float32MultiArray input go directly to env.step at line 475, sharing the controller’s platform-specific index convention. | Vehicle command-layout changes require coordinated bridge/controller edits; define command values and perform simulator-specific translation at the adapter boundary. |
-| <a id="v-04"></a>V-04 | REP (dependency metadata) | `sim_bridge/package.xml:11` / `dependency declarations` | **Moderate.** Manifest has only test dependencies although runtime imports rclpy, ROS message packages, cv_bridge, NumPy and HoloOcean (main); setup.py declares only setuptools. | The installed component metadata does not state the runtime prerequisites needed by deployment consumers. |
-| <a id="v-05"></a>V-05 | SRP / DIP | `sim_bridge/sim_bridge/holoocean_node.py:548` / `vortex_field / set_ocean_currents` | **Moderate.** Sensor handling also computes an experiment-specific vortex field and directly applies it to the hardcoded auv0 simulator agent at line 549. | Environmental experiment policy shares the sensor transport/stepping loop; inject CurrentField and scenario-owned agent selection so transport changes do not alter experimental conditions. |
+| <a id="v-01"></a>V-01 | SRP | `auv_sim_bridge/auv_sim_bridge/holoocean_node.py:59` / `HoloOceanROS2Bridge` | **Moderate.** One class loads scenario JSON, initializes middleware, owns command state, steps the simulator and encodes every sensor; construction calls the blocking loop at line 136. | Simulator lifecycle, deployment configuration and ROS sensor-schema actors change the same class; construction and use cannot be tested independently. |
+| <a id="v-02"></a>V-02 | OCP | `auv_sim_bridge/auv_sim_bridge/holoocean_node.py:478` / `sensor dispatch in _run_holoocean_loop` | **Moderate.** The loop enumerates sensor names and per-sensor try/publish branches; a new sensor requires editing the central stepping loop as well as implementing conversion. | Sensor extension changes simulator scheduling infrastructure; a registry of sensor adapters would localize those changes. |
+| <a id="v-03"></a>V-03 | CCP / DIP (protocol boundary) | `auv_sim_bridge/auv_sim_bridge/holoocean_node.py:122` / `command vector / cmd_callback` | **Moderate.** The shared default eight-element command and Float32MultiArray input go directly to env.step at line 475, sharing the controller’s platform-specific index convention. | Vehicle command-layout changes require coordinated bridge/controller edits; define command values and perform simulator-specific translation at the adapter boundary. |
+| <a id="v-04"></a>V-04 | REP (dependency metadata) | `auv_sim_bridge/package.xml:11` / `dependency declarations` | **Moderate.** Manifest has only test dependencies although runtime imports rclpy, ROS message packages, cv_bridge, NumPy and HoloOcean (main); setup.py declares only setuptools. | The installed component metadata does not state the runtime prerequisites needed by deployment consumers. |
+| <a id="v-05"></a>V-05 | SRP / DIP | `auv_sim_bridge/auv_sim_bridge/holoocean_node.py:548` / `vortex_field / set_ocean_currents` | **Moderate.** Sensor handling also computes an experiment-specific vortex field and directly applies it to the hardcoded auv0 simulator agent at line 549. | Environmental experiment policy shares the sensor transport/stepping loop; inject CurrentField and scenario-owned agent selection so transport changes do not alter experimental conditions. |
 
 ## Proposed Structural Boundary
 - Interfaces to extract: `SimulationSession` (step/close), `CurrentField`, `CommandSource`, narrow per-sensor output sinks and `ScenarioLoader`; pure SensorFrame/Pose/Command values.
@@ -84,30 +84,30 @@ Actor labels are inferred responsibilities, not verified organizational roles. S
 
 | File | Current defined classes / top-level functions | Ideal placement / diagnostic disposition |
 |---|---|---|
-| `sim_bridge/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `sim_bridge/setup.cfg` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `sim_bridge/setup.py` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `sim_bridge/sim_bridge/__init__.py` | No classes/top-level Python functions | Empty package marker; no executable policy or class interaction to partition. |
-| `sim_bridge/sim_bridge/holoocean_node.py` | `HoloOceanROS2Bridge:59`; `quaternion_from_euler:41`; `vortex_field:48`; `main:565` | Separate simulator session, ROS sensor adapters, configuration loader and pure conversion math. |
-| `sim_bridge/test/test_copyright.py` | `test_copyright:23` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
-| `sim_bridge/test/test_flake8.py` | `test_flake8:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
-| `sim_bridge/test/test_pep257.py` | `test_pep257:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_sim_bridge/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_sim_bridge/setup.cfg` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_sim_bridge/setup.py` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_sim_bridge/auv_sim_bridge/__init__.py` | No classes/top-level Python functions | Empty package marker; no executable policy or class interaction to partition. |
+| `auv_sim_bridge/auv_sim_bridge/holoocean_node.py` | `HoloOceanROS2Bridge:59`; `quaternion_from_euler:41`; `vortex_field:48`; `main:565` | Separate simulator session, ROS sensor adapters, configuration loader and pure conversion math. |
+| `auv_sim_bridge/test/test_copyright.py` | `test_copyright:23` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_sim_bridge/test/test_flake8.py` | `test_flake8:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_sim_bridge/test/test_pep257.py` | `test_pep257:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
 
 ## Class Counting Evidence
 
-- `sim_bridge/sim_bridge/holoocean_node.py`: `HoloOceanROS2Bridge` (line 59).
+- `auv_sim_bridge/auv_sim_bridge/holoocean_node.py`: `HoloOceanROS2Bridge` (line 59).
 
 ## Function and Class Interaction Detail
 
 The following module diagrams are static Python AST call/name and class-containment maps. Dotted edges indicate containment, solid edges an explicit local call. Repeated method names are resolved within the containing class; nested functions belong to their lexical owner. Dynamic dispatch, callbacks registered for later execution and arbitrary imported calls are not inferred as exact call edges. Package diagrams above supply the cross-module and C++ relationships. See [source coverage](../source_coverage.md) for all imports, C++ includes and function symbols.
 
-### `sim_bridge/__init__.py`
+### `auv_sim_bridge/__init__.py`
 
 Ideal placement: Empty package marker; no executable policy or class interaction to partition.
 
 No executable local symbol interaction (empty marker or import/registry facade).
 
-### `sim_bridge/holoocean_node.py`
+### `auv_sim_bridge/holoocean_node.py`
 
 Ideal placement: Separate simulator session, ROS sensor adapters, configuration loader and pure conversion math.
 

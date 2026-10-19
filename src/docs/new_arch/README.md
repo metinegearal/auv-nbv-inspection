@@ -14,5 +14,5 @@ These documents describe this workspace. The earlier [architecture audit](../arc
 | Simulator session / sensor dispatch | [Simulation bridge](sim_bridge_architecture_documentation.md) |
 | Observer metrics / reports | [Benchmark evaluator](benchmark_evaluator_architecture.md) |
 | Shared contracts, storage and experiments | [Support packages](support_packages_architecture.md) |
-| Parameters and defaults | [Bringup configuration](../../bringup/config/README.md) |
+| Parameters and defaults | [Bringup configuration](../../auv_bringup/config/README.md) |
 | Full changed/new source and build files | [Complete code bundle](../architecture/refactoring_complete_code.md) |

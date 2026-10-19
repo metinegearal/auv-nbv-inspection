@@ -5,13 +5,13 @@ Documentation is linked from [the architecture index](../new_arch/README.md).
 This generated review artifact contains no omitted code. Protocol `...` bodies are actual abstract declarations.
 The optimizer moved to `auv_experiments`; the separately removed legacy planner Tools are not restored.
 
-### NBV_paper_ros2/src/active_inspection_planner/CMakeLists.txt
+### NBV_paper_ros2/src/auv_inspection_planner/CMakeLists.txt
 
 SHA-256: `2cf5f76928c8f1af38c540e9fc90aab0aee2e90bf565c9bcbec79e1e07f1d657`
 
 ````cmake
 cmake_minimum_required(VERSION 3.8)
-project(active_inspection_planner)
+project(auv_inspection_planner)
 if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
 endif()
@@ -63,7 +63,7 @@ endif()
 ament_package()
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/include/active_inspection_planner/adapters/maps.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/include/auv_inspection_planner/adapters/maps.hpp
 
 SHA-256: `eeddea6d0e0636b93600a495a57aa6e3ac9309954abce4084799e3080ab30476`
 
@@ -72,7 +72,7 @@ SHA-256: `eeddea6d0e0636b93600a495a57aa6e3ac9309954abce4084799e3080ab30476`
 #include <octomap/ColorOcTree.h>
 #include <pcl/point_cloud.h>
 #include <pcl/kdtree/kdtree_flann.h>
-#include "active_inspection_planner/domain/contracts.hpp"
+#include "auv_inspection_planner/domain/contracts.hpp"
 namespace inspection
 {
 class OctomapAdapter final : public MapReader, public MapWriter, public MapSnapshotStore {
@@ -147,7 +147,7 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/include/active_inspection_planner/adapters/mission_io.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/include/auv_inspection_planner/adapters/mission_io.hpp
 
 SHA-256: `1135d7d797e852cdf1392d0ccb12b642d45aeb5ea5d7c4a5071e3f2c767a3a81`
 
@@ -159,7 +159,7 @@ SHA-256: `1135d7d797e852cdf1392d0ccb12b642d45aeb5ea5d7c4a5071e3f2c767a3a81`
 #include <opencv2/opencv.hpp>
 #include <fstream>
 #include <iostream>
-#include "active_inspection_planner/domain/contracts.hpp"
+#include "auv_inspection_planner/domain/contracts.hpp"
 namespace inspection
 {
 class RosDiagnostics final : public Diagnostics {
@@ -239,7 +239,7 @@ inline std::shared_ptr<const DepthImage> depth_values(const cv::Mat & image)
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/include/active_inspection_planner/domain/contracts.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/include/auv_inspection_planner/domain/contracts.hpp
 
 SHA-256: `0419db190233142f787affb6ae7a4572c41c3944a3bcd7f8cb9b0ac7dd36223e`
 
@@ -252,7 +252,7 @@ SHA-256: `0419db190233142f787affb6ae7a4572c41c3944a3bcd7f8cb9b0ac7dd36223e`
 #include <memory>
 #include <chrono>
 #include <cstdio>
-#include "active_inspection_planner/domain/search.hpp"
+#include "auv_inspection_planner/domain/search.hpp"
 namespace inspection
 {
 struct MapperConfig
@@ -343,7 +343,7 @@ template<class ... Args> std::string format_text(const char * format, Args... ar
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/include/active_inspection_planner/domain/search.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/include/auv_inspection_planner/domain/search.hpp
 
 SHA-256: `63edf3778efc1cbdae15f2dc0f1bd2cd3035756050eb35d5d26a9141f93e2849`
 
@@ -399,13 +399,13 @@ public:
 #endif
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/include/active_inspection_planner/use_cases/mapping.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/include/auv_inspection_planner/use_cases/mapping.hpp
 
 SHA-256: `c6da8f86c822a77bec208d2fb03f7f63570f2f28a9198ed75031f4a08caced04`
 
 ````cpp
 #pragma once
-#include "active_inspection_planner/domain/contracts.hpp"
+#include "auv_inspection_planner/domain/contracts.hpp"
 namespace inspection
 {
 class MapUpdate {
@@ -448,13 +448,13 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/include/active_inspection_planner/use_cases/mission.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/include/auv_inspection_planner/use_cases/mission.hpp
 
 SHA-256: `bf7d26b648568c3b277215cd768252a3c52662ac4b8c7477fa58e791a8b1e7e4`
 
 ````cpp
 #pragma once
-#include "active_inspection_planner/use_cases/mapping.hpp"
+#include "auv_inspection_planner/use_cases/mapping.hpp"
 namespace inspection
 {
 class InspectionMission {
@@ -568,7 +568,7 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/package.xml
+### NBV_paper_ros2/src/auv_inspection_planner/package.xml
 
 SHA-256: `9ee1a4c246f73f46fa1c794c1ff2cba5699525c10f59df7ac29de123f4bb95df`
 
@@ -576,7 +576,7 @@ SHA-256: `9ee1a4c246f73f46fa1c794c1ff2cba5699525c10f59df7ac29de123f4bb95df`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>active_inspection_planner</name>
+  <name>auv_inspection_planner</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -605,15 +605,15 @@ SHA-256: `9ee1a4c246f73f46fa1c794c1ff2cba5699525c10f59df7ac29de123f4bb95df`
 </package>
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/adapters/maps.cpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/adapters/maps.cpp
 
 SHA-256: `f685145495f55063dec0fdc3a5da9a4df81b5daba0e8e985359004d61e0a15ab`
 
 ````cpp
-#include "active_inspection_planner/adapters/maps.hpp"
+#include "auv_inspection_planner/adapters/maps.hpp"
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/nbv_utility_node.cpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/nbv_utility_node.cpp
 
 SHA-256: `02d837407b2afc06d5182fdf00622cf41f1f0725a1a10f132ca34fc7627c6332`
 
@@ -628,9 +628,9 @@ SHA-256: `02d837407b2afc06d5182fdf00622cf41f1f0725a1a10f132ca34fc7627c6332`
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 
-#include "active_inspection_planner/use_cases/mission.hpp"
-#include "active_inspection_planner/adapters/maps.hpp"
-#include "active_inspection_planner/adapters/mission_io.hpp"
+#include "auv_inspection_planner/use_cases/mission.hpp"
+#include "auv_inspection_planner/adapters/maps.hpp"
+#include "auv_inspection_planner/adapters/mission_io.hpp"
 #include <fstream>
 #include <chrono>
 
@@ -735,12 +735,12 @@ int main(int argc, char ** argv)
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/policy/mapping.cpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/policy/mapping.cpp
 
 SHA-256: `57ba31642b3c8b44b3561187b42346b50732468c2183f6819245fbab364ac1f4`
 
 ````cpp
-#include "active_inspection_planner/use_cases/mapping.hpp"
+#include "auv_inspection_planner/use_cases/mapping.hpp"
 #include <algorithm>
 #include <numeric>
 #include <sstream>
@@ -1328,7 +1328,7 @@ std::vector<Eigen::Vector4d> RoutePlanner::generate_seamless_mission_trajectory(
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/realtime_stereo_mapper.cpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/realtime_stereo_mapper.cpp
 
 SHA-256: `4c521620f07110f9a15d812e13294df33be9de0cd3fbaaddcd201d8575453dcb`
 
@@ -1336,22 +1336,22 @@ SHA-256: `4c521620f07110f9a15d812e13294df33be9de0cd3fbaaddcd201d8575453dcb`
 #include "realtime_stereo_mapper.hpp"
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/realtime_stereo_mapper.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/realtime_stereo_mapper.hpp
 
 SHA-256: `9f04c410dca17070e2540f74ff81a0a391752f90a2cf3d3839516e109359ee0a`
 
 ````cpp
 #pragma once
 // Policy types are independently reusable; composition is in nbv_utility_node.cpp.
-#include "active_inspection_planner/use_cases/mapping.hpp"
+#include "auv_inspection_planner/use_cases/mapping.hpp"
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/search_algo.cpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/search_algo.cpp
 
 SHA-256: `ca660bc05f089073b4f0c1b8c06481091cfdf97d9fa2d0a5789b264b76309cd5`
 
 ````cpp
-#include "active_inspection_planner/domain/search.hpp"
+#include "auv_inspection_planner/domain/search.hpp"
 
 // --- Helper structures for A* ---
 struct AStarNode
@@ -1546,13 +1546,13 @@ bool SearchPolicy::check_line_of_sight(
 }
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/src/search_algo.hpp
+### NBV_paper_ros2/src/auv_inspection_planner/src/search_algo.hpp
 
 SHA-256: `0a36cbf5d3cdb9babd5272043b04e791cf4702d8812a8756cf5f2e67af80a539`
 
 ````cpp
 #pragma once
-#include "active_inspection_planner/domain/search.hpp"
+#include "auv_inspection_planner/domain/search.hpp"
 #include <iostream>
 
 // Preserve the original standalone API and its stderr diagnostics at the outer boundary.
@@ -1568,14 +1568,14 @@ public:
 };
 ````
 
-### NBV_paper_ros2/src/active_inspection_planner/test/policy_regression.cpp
+### NBV_paper_ros2/src/auv_inspection_planner/test/policy_regression.cpp
 
 SHA-256: `fae9cbba093bfad8797e34c3f8b9e27f5c92cfdf42226ac1a69403edb4316e23`
 
 ````cpp
 #include <cmath>
 #include <cstdlib>
-#include "active_inspection_planner/use_cases/mapping.hpp"
+#include "auv_inspection_planner/use_cases/mapping.hpp"
 
 void require(bool condition) {if(!condition) {std::abort();}}
 struct Map final : inspection::MapReader, inspection::MapWriter
@@ -1886,7 +1886,7 @@ SHA-256: `728dbb0980bf74bf9ebe1ec4b37f4d4d0dd870d657e4cc72b5db6fe3e407d84e`
 
 ````python
 import optuna
-from benchmark_evaluator.benchmark_evaluator import evaluate_map_accuracy
+from auv_benchmark.auv_benchmark import evaluate_map_accuracy
 from .runner_adapter import RosTrialRunner
 from .trial_policy import TrialObjective
 
@@ -1937,12 +1937,12 @@ import signal
 import os
 from pathlib import Path
 import yaml
-from bringup.configuration import apply_trial_overrides
+from auv_bringup.configuration import apply_trial_overrides
 from auv_contracts.mission_results import MISSION_STATS_FILENAME, distance_from_records
 
 
 ROS_WORKSPACE = Path(__file__).resolve().parents[3]
-BASE_PARAMS_PATH = ROS_WORKSPACE / 'src' / 'bringup' / 'config' / 'params.yaml'
+BASE_PARAMS_PATH = ROS_WORKSPACE / 'src' / 'auv_bringup' / 'config' / 'params.yaml'
 TEMP_PARAMS_PATH = ROS_WORKSPACE / 'temp_optuna_params.yaml'
 MAP_PATH = ROS_WORKSPACE / 'results' / 'final_map_ros2.bt'
 MISSION_STATS_PATH = ROS_WORKSPACE / 'results' / MISSION_STATS_FILENAME
@@ -1972,7 +1972,7 @@ class RosTrialRunner:
         cmd = (
             f"source /opt/ros/jazzy/setup.bash && "
             f"source {ROS_WORKSPACE}/install/setup.bash && "
-            f"ros2 launch bringup mapper.launch.py params_file:={TEMP_PARAMS_PATH}"
+            f"ros2 launch auv_bringup mapper.launch.py params_file:={TEMP_PARAMS_PATH}"
         )
 
         print("Launching ROS 2 stack...")
@@ -2068,8 +2068,8 @@ SHA-256: `c33cf2fc455327f4540e9c6fdf68ab50768e79036d979a668f11d7e6d632c08a`
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
   <license>TODO: License declaration</license>
   <buildtool_depend>ament_python</buildtool_depend>
-  <exec_depend>bringup</exec_depend>
-  <exec_depend>benchmark_evaluator</exec_depend>
+  <exec_depend>auv_bringup</exec_depend>
+  <exec_depend>auv_benchmark</exec_depend>
   <exec_depend>auv_contracts</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
@@ -2112,7 +2112,7 @@ setup(name='auv_experiments', version='0.0.0', packages=find_packages(),
       description='Outer AUV experiment orchestration', license='TODO: License declaration')
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/adapters/__init__.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/adapters/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -2120,7 +2120,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/adapters/map_geometry.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/adapters/map_geometry.py
 
 SHA-256: `25d92dc43e2ecfb762582cbc49b8825340d0d91439174fba8f756bd1356f33c1`
 
@@ -2241,7 +2241,7 @@ class Open3DMapEvaluation:
 
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/adapters/reports.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/adapters/reports.py
 
 SHA-256: `b500f64f75fc3ba2f11eafc3a3ead31a89a60be7b7dbec3a6599c22a96b2b5a6`
 
@@ -2415,7 +2415,7 @@ class FileReportWriter:
         return metrics, diagnostics_path
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/benchmark_evaluator.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/auv_benchmark.py
 
 SHA-256: `903c029455ca0922a236ea4bccb292ce1a4451f3fc144f54e4b8442928a2f047`
 
@@ -2428,7 +2428,7 @@ if not __package__:
     import sys
     package_dir = Path(__file__).resolve().parent
     spec = importlib.util.spec_from_file_location(
-        'benchmark_evaluator', package_dir / '__init__.py',
+        'auv_benchmark', package_dir / '__init__.py',
         submodule_search_locations=[str(package_dir)])
     package = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = package
@@ -2449,7 +2449,7 @@ if __name__ == '__main__':
     evaluate_map_accuracy()
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/domain/__init__.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/domain/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -2457,7 +2457,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/domain/evaluation.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/domain/evaluation.py
 
 SHA-256: `c489d7f453f8c4a3bf590ea9989e922187b3f40d2d11ccd4b9d1791cc34e87a0`
 
@@ -2496,13 +2496,13 @@ class MapEvaluationConfig:
     surface_z: float = -32.0
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/midrun_logger.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/midrun_logger.py
 
 SHA-256: `a2db5594d3169e701998342d5bc9068c208532ea4cdd19eb7e6002485768ca1f`
 
 ````python
 """Compatibility exports; storage and visualization have separate owners."""
-from telemetry_adapters.file_sinks import MidrunLogger
+from auv_telemetry.file_sinks import MidrunLogger
 from .plot_adapter import generate_results_plot
 from datetime import datetime
 
@@ -2510,7 +2510,7 @@ def default_run_id():
     return datetime.now().strftime('%Y%m%d_%H%M%S')
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/plot_adapter.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/plot_adapter.py
 
 SHA-256: `7a765a052a1bfdab2cb1baa0affcc353b40e6bdcb788c28f4675efbe98bf16cd`
 
@@ -2643,7 +2643,7 @@ def generate_results_plot(results_dir='results', prefix='benchmark',
     return output_path
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/run_baselines.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/run_baselines.py
 
 SHA-256: `0e25d420cbf08b3851110cbb56161c92a30e2ed48a5c452a4a56e1e022336367`
 
@@ -2654,7 +2654,7 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float32MultiArray
 from auv_contracts.values import PoseSample, Vector3, Quaternion, Stamp, ArrayEvent, Flag
-from telemetry_adapters.file_sinks import MidrunLogger
+from auv_telemetry.file_sinks import MidrunLogger
 from .adapters.reports import FileReportWriter
 from .use_cases.trajectory_evaluation import TrajectoryEvaluation
 
@@ -2699,7 +2699,7 @@ if __name__ == '__main__':
     main()
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/use_cases/__init__.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/use_cases/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -2707,7 +2707,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/use_cases/map_evaluation.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/use_cases/map_evaluation.py
 
 SHA-256: `30415b3ef01aafed365939958e4be595082539fb6e36ba38b1ec13da02deedd6`
 
@@ -2753,7 +2753,7 @@ class EvaluateMap:
         self.geometry.visualize(map_to_gt_dists)
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/benchmark_evaluator/use_cases/trajectory_evaluation.py
+### NBV_paper_ros2/src/auv_benchmark/auv_benchmark/use_cases/trajectory_evaluation.py
 
 SHA-256: `606804be2fb24d374b2e1b506367cd57a59a998fe43646de3640c2192bc9468c`
 
@@ -2955,7 +2955,7 @@ class TrajectoryEvaluation:
 
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/package.xml
+### NBV_paper_ros2/src/auv_benchmark/package.xml
 
 SHA-256: `c80636764f6921de975ba246f7f99a5703904260973b33b28c62f49cc3277c51`
 
@@ -2963,7 +2963,7 @@ SHA-256: `c80636764f6921de975ba246f7f99a5703904260973b33b28c62f49cc3277c51`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>benchmark_evaluator</name>
+  <name>auv_benchmark</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -2977,7 +2977,7 @@ SHA-256: `c80636764f6921de975ba246f7f99a5703904260973b33b28c62f49cc3277c51`
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>auv_contracts</exec_depend>
-  <exec_depend>telemetry_adapters</exec_depend>
+  <exec_depend>auv_telemetry</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
@@ -2990,14 +2990,14 @@ SHA-256: `c80636764f6921de975ba246f7f99a5703904260973b33b28c62f49cc3277c51`
 </package>
 ````
 
-### NBV_paper_ros2/src/benchmark_evaluator/setup.py
+### NBV_paper_ros2/src/auv_benchmark/setup.py
 
 SHA-256: `b6218ae4855e531dc60c0c790485cf98d8039b8e6e485ee4b7a902315bc54ff2`
 
 ````python
 from setuptools import find_packages, setup
 
-package_name = 'benchmark_evaluator'
+package_name = 'auv_benchmark'
 
 setup(
     name=package_name,
@@ -3021,14 +3021,14 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'run_baselines = benchmark_evaluator.run_baselines:main',
-            'plot_benchmark_results = benchmark_evaluator.plot_results:main',
+            'run_baselines = auv_benchmark.run_baselines:main',
+            'plot_benchmark_results = auv_benchmark.plot_results:main',
         ],
     },
 )
 ````
 
-### NBV_paper_ros2/src/bringup/bringup/configuration.py
+### NBV_paper_ros2/src/auv_bringup/auv_bringup/configuration.py
 
 SHA-256: `914bbda9a6f77e5205064ced071a38ba5111dd2426e0e6ae39b3bc22e2ce66cb`
 
@@ -3046,7 +3046,7 @@ def apply_trial_overrides(parameters, overrides, map_path, results_dir):
     return parameters
 ````
 
-### NBV_paper_ros2/src/bringup/package.xml
+### NBV_paper_ros2/src/auv_bringup/package.xml
 
 SHA-256: `bc18400b7eaa65878c32d4305ba7c873722b808a98166687d873ab5930db0c21`
 
@@ -3054,7 +3054,7 @@ SHA-256: `bc18400b7eaa65878c32d4305ba7c873722b808a98166687d873ab5930db0c21`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>bringup</name>
+  <name>auv_bringup</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -3068,11 +3068,11 @@ SHA-256: `bc18400b7eaa65878c32d4305ba7c873722b808a98166687d873ab5930db0c21`
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>sim_bridge</exec_depend>
-  <exec_depend>perception</exec_depend>
-  <exec_depend>motion_control</exec_depend>
-  <exec_depend>python_planner</exec_depend>
-  <exec_depend>benchmark_evaluator</exec_depend>
+  <exec_depend>auv_sim_bridge</exec_depend>
+  <exec_depend>auv_stereo_depth</exec_depend>
+  <exec_depend>auv_motion_control</exec_depend>
+  <exec_depend>auv_planner_reference</exec_depend>
+  <exec_depend>auv_benchmark</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
@@ -3080,7 +3080,7 @@ SHA-256: `bc18400b7eaa65878c32d4305ba7c873722b808a98166687d873ab5930db0c21`
 </package>
 ````
 
-### NBV_paper_ros2/src/bringup/setup.py
+### NBV_paper_ros2/src/auv_bringup/setup.py
 
 SHA-256: `36e7fce8b3e4ce0a2b41171aae53ab82f6bf5b118726f13150d462b26efe759b`
 
@@ -3089,7 +3089,7 @@ import os
 
 from setuptools import find_packages, setup
 
-package_name = 'bringup'
+package_name = 'auv_bringup'
 
 setup(
     name=package_name,
@@ -3151,7 +3151,7 @@ def git_paths(directory, arguments, prefix=Path()):
 def source_bundle():
     paths = git_paths(REPOSITORY, ['diff', '--name-only', '--', 'src'])
     paths += git_paths(REPOSITORY, ['ls-files', '--others', '--exclude-standard', 'src'])
-    vendor = Path('src/perception/perception/BGNet')
+    vendor = Path('src/auv_stereo_depth/auv_stereo_depth/BGNet')
     paths += git_paths(REPOSITORY / vendor, ['diff', '--name-only'], vendor)
     paths += git_paths(REPOSITORY / vendor, ['ls-files', '--others', '--exclude-standard'], vendor)
     selected = []
@@ -3325,8 +3325,8 @@ SHA-256: `ffc7afec2ef25866997af547ed882ba41a640366ab2cea1b337943b211e43f54`
 #ifdef ORIGINAL_MAPPER
 #include "realtime_stereo_mapper.hpp"
 #else
-#include "active_inspection_planner/use_cases/mapping.hpp"
-#include "active_inspection_planner/adapters/maps.hpp"
+#include "auv_inspection_planner/use_cases/mapping.hpp"
+#include "auv_inspection_planner/adapters/maps.hpp"
 struct QuietDiagnostics final : inspection::Diagnostics {
   void text(const std::string&,bool,bool) override {}
   void info(const std::string&) override {}
@@ -3409,20 +3409,20 @@ import numpy as np
 import pytest
 
 SOURCE = Path(__file__).resolve().parents[3]
-for package in ('auv_contracts', 'perception', 'python_planner', 'sim_bridge',
-                'benchmark_evaluator', 'auv_experiments', 'bringup'):
+for package in ('auv_contracts', 'auv_stereo_depth', 'auv_planner_reference', 'auv_sim_bridge',
+                'auv_benchmark', 'auv_experiments', 'auv_bringup'):
     sys.path.insert(0, str(SOURCE / package))
 
 from auv_contracts.values import Configuration, CameraCalibration, Trajectory, ArrayEvent
 from auv_contracts.mission_results import distance_record, distance_from_records
-from perception.use_cases.depth import StereoDepthUseCase
-from sim_bridge.use_cases.simulation import SimulationRunner
-from sim_bridge.domain.simulation import Command
-from sim_bridge.adapters.sensor_dispatch import SensorDispatch
-from benchmark_evaluator.use_cases.map_evaluation import EvaluateMap
-from benchmark_evaluator.use_cases.trajectory_evaluation import TrajectoryEvaluation
+from auv_stereo_depth.use_cases.depth import StereoDepthUseCase
+from auv_sim_bridge.use_cases.simulation import SimulationRunner
+from auv_sim_bridge.domain.simulation import Command
+from auv_sim_bridge.adapters.sensor_dispatch import SensorDispatch
+from auv_benchmark.use_cases.map_evaluation import EvaluateMap
+from auv_benchmark.use_cases.trajectory_evaluation import TrajectoryEvaluation
 from auv_experiments.trial_policy import TrialObjective
-from bringup.configuration import apply_trial_overrides
+from auv_bringup.configuration import apply_trial_overrides
 
 
 class Diagnostics:
@@ -3565,7 +3565,7 @@ def test_python_policy_modules_have_no_framework_or_io_imports():
                  'torch', 'torchvision', 'open3d', 'pyoctomap', 'holoocean', 'cv2',
                  'matplotlib', 'subprocess', 'os', 'pathlib'}
     paths = list((SOURCE / 'auv_contracts/auv_contracts').glob('*.py'))
-    for package in ('python_planner', 'perception', 'sim_bridge', 'benchmark_evaluator'):
+    for package in ('auv_planner_reference', 'auv_stereo_depth', 'auv_sim_bridge', 'auv_benchmark'):
         for layer in ('domain', 'use_cases'):
             paths.extend((SOURCE / package / package / layer).glob('*.py'))
     paths.append(SOURCE / 'auv_experiments/auv_experiments/trial_policy.py')
@@ -3581,13 +3581,13 @@ def test_python_policy_modules_have_no_framework_or_io_imports():
             assert not forbidden.intersection(names), path
 ````
 
-### NBV_paper_ros2/src/motion_control/CMakeLists.txt
+### NBV_paper_ros2/src/auv_motion_control/CMakeLists.txt
 
 SHA-256: `5ce1ceac7c83a42e0633a030eaaeec86644f403ad31675f1fa37573853639daa`
 
 ````cmake
 cmake_minimum_required(VERSION 3.8)
-project(motion_control)
+project(auv_motion_control)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -3626,7 +3626,7 @@ endif()
 ament_package()
 ````
 
-### NBV_paper_ros2/src/motion_control/include/motion_control/adapters/ros_control_io.hpp
+### NBV_paper_ros2/src/auv_motion_control/include/auv_motion_control/adapters/ros_control_io.hpp
 
 SHA-256: `b533fa96b0fcb546b1b06da6bc15e51262a69bad099edf81f4a1ec7f098d6e4d`
 
@@ -3634,8 +3634,8 @@ SHA-256: `b533fa96b0fcb546b1b06da6bc15e51262a69bad099edf81f4a1ec7f098d6e4d`
 #pragma once
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
-#include "motion_control/domain/contracts.hpp"
-namespace motion_control
+#include "auv_motion_control/domain/contracts.hpp"
+namespace auv_motion_control
 {
 class RosControlIO final : public Clock, public Gains, public Diagnostics, public CommandOutput {
   rclcpp::Node & node_;
@@ -3668,7 +3668,7 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/include/motion_control/adapters/thrusters.hpp
+### NBV_paper_ros2/src/auv_motion_control/include/auv_motion_control/adapters/thrusters.hpp
 
 SHA-256: `fc16de09a404ec690e0844054d2ce190efe8933b24282ec8992b73ed4fd20c03`
 
@@ -3676,8 +3676,8 @@ SHA-256: `fc16de09a404ec690e0844054d2ce190efe8933b24282ec8992b73ed4fd20c03`
 #pragma once
 #include <algorithm>
 #include <map>
-#include "motion_control/domain/contracts.hpp"
-namespace motion_control
+#include "auv_motion_control/domain/contracts.hpp"
+namespace auv_motion_control
 {
 class ConfiguredModes final : public Modes {
   const std::map<std::string, ControlMode> modes_;
@@ -3749,7 +3749,7 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/include/motion_control/domain/contracts.hpp
+### NBV_paper_ros2/src/auv_motion_control/include/auv_motion_control/domain/contracts.hpp
 
 SHA-256: `84e0ec350b025c1a60ea3d919c99b779a26fc23a8e5229b1d5fd5c8af7adf242`
 
@@ -3760,7 +3760,7 @@ SHA-256: `84e0ec350b025c1a60ea3d919c99b779a26fc23a8e5229b1d5fd5c8af7adf242`
 #include <memory>
 #include <cstdio>
 #include <cstddef>
-namespace motion_control
+namespace auv_motion_control
 {
 struct Position { const double x, y, z; };
 struct MotorCommand { const std::vector<double> values; };
@@ -3827,7 +3827,7 @@ template<class ... Args> std::string format_text(const char * format, Args... ar
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/include/motion_control/domain/math_pid_utils.hpp
+### NBV_paper_ros2/src/auv_motion_control/include/auv_motion_control/domain/math_pid_utils.hpp
 
 SHA-256: `147b483e7cbeae93da3b23164350e6434b3c75779e2d0540880570a769caed0e`
 
@@ -3916,7 +3916,7 @@ private:
 } // namespace utils
 ````
 
-### NBV_paper_ros2/src/motion_control/include/motion_control/use_cases/trajectory_queue.hpp
+### NBV_paper_ros2/src/auv_motion_control/include/auv_motion_control/use_cases/trajectory_queue.hpp
 
 SHA-256: `50133a110c32ebf468516983565715f9d65e07f18b36fe8af2c6c0e8dc34947a`
 
@@ -3924,8 +3924,8 @@ SHA-256: `50133a110c32ebf468516983565715f9d65e07f18b36fe8af2c6c0e8dc34947a`
 #pragma once
 #include <algorithm>
 #include <cmath>
-#include "motion_control/domain/contracts.hpp"
-namespace motion_control
+#include "auv_motion_control/domain/contracts.hpp"
+namespace auv_motion_control
 {
 class TrajectoryQueue {
   WaypointOutput & output_; Diagnostics & diagnostics_;
@@ -4063,7 +4063,7 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/include/motion_control/use_cases/waypoint_controller.hpp
+### NBV_paper_ros2/src/auv_motion_control/include/auv_motion_control/use_cases/waypoint_controller.hpp
 
 SHA-256: `e22eb41ef880f3fbce9d23173903830d43ed4f1077502801490ff3cb7cde6b48`
 
@@ -4072,9 +4072,9 @@ SHA-256: `e22eb41ef880f3fbce9d23173903830d43ed4f1077502801490ff3cb7cde6b48`
 #include <algorithm>
 #include <cmath>
 #include <optional>
-#include "motion_control/domain/contracts.hpp"
-#include "motion_control/domain/math_pid_utils.hpp"
-namespace motion_control
+#include "auv_motion_control/domain/contracts.hpp"
+#include "auv_motion_control/domain/math_pid_utils.hpp"
+namespace auv_motion_control
 {
 class WaypointController {
   Clock & clock_; Gains & gains_; Diagnostics & diagnostics_; CommandOutput & output_;
@@ -4395,7 +4395,7 @@ public:
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/package.xml
+### NBV_paper_ros2/src/auv_motion_control/package.xml
 
 SHA-256: `c5a0e8f73027740027fb5ab1c4ce9f3f7654b851dc1d85c707c888c96a4742fd`
 
@@ -4403,7 +4403,7 @@ SHA-256: `c5a0e8f73027740027fb5ab1c4ce9f3f7654b851dc1d85c707c888c96a4742fd`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>motion_control</name>
+  <name>auv_motion_control</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -4426,7 +4426,7 @@ SHA-256: `c5a0e8f73027740027fb5ab1c4ce9f3f7654b851dc1d85c707c888c96a4742fd`
 </package>
 ````
 
-### NBV_paper_ros2/src/motion_control/src/PathPlanning.py
+### NBV_paper_ros2/src/auv_motion_control/src/PathPlanning.py
 
 SHA-256: `c70d81c1a26dfe80f10e1f4d407906d7272a5565efd955270572b07480264683`
 
@@ -4660,16 +4660,16 @@ if __name__ == '__main__':
     main()
 ````
 
-### NBV_paper_ros2/src/motion_control/src/control_policy.cpp
+### NBV_paper_ros2/src/auv_motion_control/src/control_policy.cpp
 
 SHA-256: `384369e907a71a49fcfef2a23a6b84f035cd5bcbb5cf145cdeda501efa0ca678`
 
 ````cpp
-#include "motion_control/use_cases/waypoint_controller.hpp"
-#include "motion_control/use_cases/trajectory_queue.hpp"
+#include "auv_motion_control/use_cases/waypoint_controller.hpp"
+#include "auv_motion_control/use_cases/trajectory_queue.hpp"
 ````
 
-### NBV_paper_ros2/src/motion_control/src/legacy_adapters.py
+### NBV_paper_ros2/src/auv_motion_control/src/legacy_adapters.py
 
 SHA-256: `1b742ff67d99cb4b01fb6986c880688042fb23a7728410b4922677a187f8d82e`
 
@@ -4703,7 +4703,7 @@ def repository_distance(first, second):
     return diff(first, second)
 ````
 
-### NBV_paper_ros2/src/motion_control/src/legacy_ports.py
+### NBV_paper_ros2/src/auv_motion_control/src/legacy_ports.py
 
 SHA-256: `296397db72f9523a823c5a9df843766ecfbb831a719feb36f8625fedeb7b5d11`
 
@@ -4724,16 +4724,16 @@ class Distance(Protocol):
     def __call__(self, first, second) -> float: ...
 ````
 
-### NBV_paper_ros2/src/motion_control/src/math_pid_utils.hpp
+### NBV_paper_ros2/src/auv_motion_control/src/math_pid_utils.hpp
 
 SHA-256: `6a7d722bc7fd1f7ffca8a2a60fe8b6e3a214af6b2ccb05cc9c3111314d4e02df`
 
 ````cpp
 #pragma once
-#include "motion_control/domain/math_pid_utils.hpp"
+#include "auv_motion_control/domain/math_pid_utils.hpp"
 ````
 
-### NBV_paper_ros2/src/motion_control/src/point_iterator.cpp
+### NBV_paper_ros2/src/auv_motion_control/src/point_iterator.cpp
 
 SHA-256: `fcaf4ebf7812443af842738f056f838397dfb361c5063d2408451733426f7744`
 
@@ -4742,9 +4742,9 @@ SHA-256: `fcaf4ebf7812443af842738f056f838397dfb361c5063d2408451733426f7744`
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/bool.hpp>
-#include "motion_control/use_cases/trajectory_queue.hpp"
-class PathPlanner : public rclcpp::Node, public motion_control::WaypointOutput,
-  public motion_control::Diagnostics {
+#include "auv_motion_control/use_cases/trajectory_queue.hpp"
+class PathPlanner : public rclcpp::Node, public auv_motion_control::WaypointOutput,
+  public auv_motion_control::Diagnostics {
 public:
   PathPlanner()
   : Node("path_planner")
@@ -4765,7 +4765,7 @@ public:
     planner_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/report", 10);
     request_nbv_pub_ = this->create_publisher<std_msgs::msg::Bool>("/planner/request_nbv", 1);
 
-    const motion_control::QueueConfig config{
+    const auv_motion_control::QueueConfig config{
       get_parameter("camera_x").as_double(),
       get_parameter("camera_y").as_double(),
       get_parameter("camera_z").as_double(),
@@ -4775,7 +4775,7 @@ public:
       get_parameter("initial_waypoint_yaw").as_double(),
       get_parameter("timer_period_s").as_double(),
       get_parameter("waypoint_reached_distance").as_double()};
-    queue_ = std::make_unique<motion_control::TrajectoryQueue>(config, *this, *this);
+    queue_ = std::make_unique<auv_motion_control::TrajectoryQueue>(config, *this, *this);
         // Subscribers
     stop_sub_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
             "/motion/report", 10,
@@ -4808,7 +4808,7 @@ public:
   }
 
 private:
-  std::unique_ptr<motion_control::TrajectoryQueue> queue_;
+  std::unique_ptr<auv_motion_control::TrajectoryQueue> queue_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr waypoint_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr planner_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr request_nbv_pub_;
@@ -4820,15 +4820,15 @@ private:
 
   void point_callback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
   {
-    queue_->point_callback(motion_control::WaypointInput{msg->data});
+    queue_->point_callback(auv_motion_control::WaypointInput{msg->data});
   }
   void pointSegment_callback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
   {
-    queue_->pointSegment_callback(motion_control::WaypointInput{msg->data});
+    queue_->pointSegment_callback(auv_motion_control::WaypointInput{msg->data});
   }
   void stop_callback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
   {
-    queue_->stop_callback(motion_control::WaypointInput{msg->data});
+    queue_->stop_callback(auv_motion_control::WaypointInput{msg->data});
   }
 
 };
@@ -4842,15 +4842,15 @@ int main(int argc, char * argv[])
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/src/thruster_adapters.cpp
+### NBV_paper_ros2/src/auv_motion_control/src/thruster_adapters.cpp
 
 SHA-256: `aebe741d5be59c3517d5edfd258860e01bf498541060a6c9da33d0f491a421a8`
 
 ````cpp
-#include "motion_control/adapters/thrusters.hpp"
+#include "auv_motion_control/adapters/thrusters.hpp"
 ````
 
-### NBV_paper_ros2/src/motion_control/src/waypoint_control_node.cpp
+### NBV_paper_ros2/src/auv_motion_control/src/waypoint_control_node.cpp
 
 SHA-256: `87e288827e83ffeed54751ada265a0ea7c0079400827efae1b09de6027d8953b`
 
@@ -4867,9 +4867,9 @@ SHA-256: `87e288827e83ffeed54751ada265a0ea7c0079400827efae1b09de6027d8953b`
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
 
-#include "motion_control/use_cases/waypoint_controller.hpp"
-#include "motion_control/adapters/ros_control_io.hpp"
-#include "motion_control/adapters/thrusters.hpp"
+#include "auv_motion_control/use_cases/waypoint_controller.hpp"
+#include "auv_motion_control/adapters/ros_control_io.hpp"
+#include "auv_motion_control/adapters/thrusters.hpp"
 
 using std::placeholders::_1;
 
@@ -4896,7 +4896,7 @@ public:
     target_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("/holo/cmd", 10);
     stop_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("/motion/report", 10);
 
-    const motion_control::ControlConfig config{get_parameter("kp_yaw").as_double(),
+    const auv_motion_control::ControlConfig config{get_parameter("kp_yaw").as_double(),
       get_parameter("kp_dist").as_double(),
       get_parameter("dvl_active").as_bool(),
       get_parameter("stopping_distance").as_double(),
@@ -4908,8 +4908,8 @@ public:
       get_parameter("min_forward_thrust").as_double(),
       get_parameter("max_forward_thrust").as_double(),
       get_parameter("command_multiplier").as_double()};
-    io_ = std::make_unique<motion_control::RosControlIO>(*this, target_pub_, stop_pub_);
-    controller_ = std::make_unique<motion_control::WaypointController>(
+    io_ = std::make_unique<auv_motion_control::RosControlIO>(*this, target_pub_, stop_pub_);
+    controller_ = std::make_unique<auv_motion_control::WaypointController>(
       config, *io_, *io_, *io_, *io_, modes_, mixer_);
     // Subscribers
     waypoint_sub_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
@@ -4939,10 +4939,10 @@ public:
   }
 
 private:
-  motion_control::ConfiguredModes modes_;
-  motion_control::EightThrusterMixer mixer_;
-  std::unique_ptr<motion_control::RosControlIO> io_;
-  std::unique_ptr<motion_control::WaypointController> controller_;
+  auv_motion_control::ConfiguredModes modes_;
+  auv_motion_control::EightThrusterMixer mixer_;
+  std::unique_ptr<auv_motion_control::RosControlIO> io_;
+  std::unique_ptr<auv_motion_control::WaypointController> controller_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr target_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr stop_pub_;
 
@@ -4982,10 +4982,10 @@ private:
   void dist_callback(const std_msgs::msg::Float32::SharedPtr msg)
   {controller_->dist_callback(msg->data);}
   void obstacle_callback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
-  {controller_->obstacle_callback(motion_control::WaypointInput{msg->data});}
+  {controller_->obstacle_callback(auv_motion_control::WaypointInput{msg->data});}
   void waypoint_callback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
   {
-    controller_->waypoint_callback(motion_control::WaypointInput{msg->data});
+    controller_->waypoint_callback(auv_motion_control::WaypointInput{msg->data});
   }
 };
 
@@ -4998,7 +4998,7 @@ int main(int argc, char ** argv)
 }
 ````
 
-### NBV_paper_ros2/src/motion_control/test/policy_regression.cpp
+### NBV_paper_ros2/src/auv_motion_control/test/policy_regression.cpp
 
 SHA-256: `c6f17d5baf91dcbea7caf27ee20558e4a60c529d7af8c25ab2319b7c6b20f544`
 
@@ -5006,11 +5006,11 @@ SHA-256: `c6f17d5baf91dcbea7caf27ee20558e4a60c529d7af8c25ab2319b7c6b20f544`
 #include <cmath>
 #include <cstdlib>
 #include <vector>
-#include "motion_control/use_cases/trajectory_queue.hpp"
-#include "motion_control/adapters/thrusters.hpp"
+#include "auv_motion_control/use_cases/trajectory_queue.hpp"
+#include "auv_motion_control/adapters/thrusters.hpp"
 
 void require(bool condition) {if(!condition) {std::abort();}}
-struct Output final : motion_control::WaypointOutput, motion_control::Diagnostics
+struct Output final : auv_motion_control::WaypointOutput, auv_motion_control::Diagnostics
 {
   std::vector<std::vector<float>> messages;
   std::size_t requests = 0;
@@ -5024,7 +5024,7 @@ struct Output final : motion_control::WaypointOutput, motion_control::Diagnostic
 int main()
 {
   Output output;
-  motion_control::TrajectoryQueue queue({.35, .3875, -.5, 354., 828., -298., 0., 1., .5}, output,
+  auv_motion_control::TrajectoryQueue queue({.35, .3875, -.5, 354., 828., -298., 0., 1., .5}, output,
     output);
   queue.timer_callback();
   require(output.messages.back() == std::vector<float>({354.f, 828.f, -298.f, 0.f}));
@@ -5041,18 +5041,18 @@ int main()
   const auto last = output.messages.back();
   queue.stop_callback({{last[0], last[1], last[2]}});
   require(output.requests == 1);
-  motion_control::EightThrusterMixer mixer;
+  auv_motion_control::EightThrusterMixer mixer;
   auto mixed = mixer.mix({'w', 'a', 'i'}, 2., std::vector<double>(8, 0.), 3.);
   require(mixed == std::vector<double>({3., 3., 3., 3., 0., -4., 0., -4.}));
   mixer.yaw(mixed, 1.);
   require(mixed == std::vector<double>({3., 3., 3., 3., -1., -3., 1., -5.}));
-  motion_control::ConfiguredModes modes;
+  auv_motion_control::ConfiguredModes modes;
   require(modes.select("full_centerize").vertical_multiplier == .25);
   require(!modes.select("unknown").centered);
 }
 ````
 
-### NBV_paper_ros2/src/perception/package.xml
+### NBV_paper_ros2/src/auv_stereo_depth/package.xml
 
 SHA-256: `7304b469fb1873e6d03d5c909e9d7aaa99f05974ab5c69f8ebf28493b241f865`
 
@@ -5060,7 +5060,7 @@ SHA-256: `7304b469fb1873e6d03d5c909e9d7aaa99f05974ab5c69f8ebf28493b241f865`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>perception</name>
+  <name>auv_stereo_depth</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -5074,7 +5074,7 @@ SHA-256: `7304b469fb1873e6d03d5c909e9d7aaa99f05974ab5c69f8ebf28493b241f865`
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>auv_contracts</exec_depend>
-  <exec_depend>telemetry_adapters</exec_depend>
+  <exec_depend>auv_telemetry</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
@@ -5091,7 +5091,7 @@ SHA-256: `7304b469fb1873e6d03d5c909e9d7aaa99f05974ab5c69f8ebf28493b241f865`
 </package>
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/__init__.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -5099,7 +5099,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/datasets/kitti12_dataset.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/datasets/kitti12_dataset.py
 
 SHA-256: `3087cb23473311a925890d0092a923f5226eb9871e349fcb65083e48bfd1348f`
 
@@ -5219,7 +5219,7 @@ class KITTI_12_Dataset(Dataset):
                    "disparity": disparity}
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/datasets/kitti_dataset.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/datasets/kitti_dataset.py
 
 SHA-256: `0c3d5d68dd114acdda70aa21518528e56706755d324614c394540e92b4908b1f`
 
@@ -5337,7 +5337,7 @@ class KITTIDataset(Dataset):
                    "disparity": disparity}
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/models/bgnet.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/models/bgnet.py
 
 SHA-256: `e9b2f3b87ce1f6f7d193167aadb7e13da97c295a2d90bc02f66ee8b5bc050348`
 
@@ -5501,7 +5501,7 @@ class BGNet(SubModule):
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/models/bgnet_plus.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/models/bgnet_plus.py
 
 SHA-256: `2f8bdf37dfbb4d10058942d7b51cc7c93a2887bddf62e2ba3d3bdd0b7f42105e`
 
@@ -5672,7 +5672,7 @@ class BGNet_Plus(SubModule):
         return out1,out2        
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/models/submodules2d.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/models/submodules2d.py
 
 SHA-256: `71a652ad5f9361313721e3ec4dc7dc07cc7ce5aabffb61b74d22198653bbf8ea`
 
@@ -5857,7 +5857,7 @@ class HourglassRefinement(SubModule):
         return disp            
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/models/submodules3d.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/models/submodules3d.py
 
 SHA-256: `b76d54b1ea90a2faaa530f2eaf0a21df210f09a108ae8a6bf82f1f0a58bc8794`
 
@@ -5921,7 +5921,7 @@ class CoeffsPredictor(HourGlass):
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/nets/__init__.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/nets/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -5929,7 +5929,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/predict.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/predict.py
 
 SHA-256: `15f69e97da89c61faf57019e0e3923e21b57f82f21e55e2032b6f97255bf9a27`
 
@@ -5997,7 +5997,7 @@ for batch_idx, sample in enumerate(TestImgLoader):
     
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/predict_sample.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/predict_sample.py
 
 SHA-256: `f2c08357faf70a94021611ce2b235446dc95b3dfc87666171cfeeb641b33928f`
 
@@ -6055,7 +6055,7 @@ pred = pred[0].data.cpu().numpy() * 256
 skimage.io.imsave('sample_disp.png',pred.astype('uint16'))
 ````
 
-### NBV_paper_ros2/src/perception/perception/BGNet/prediction_registry.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/BGNet/prediction_registry.py
 
 SHA-256: `b035c43939efc823cbd4159734124a982091eb49d7017bdb980f5d6f317c9082`
 
@@ -6075,7 +6075,7 @@ OUTPUT_SUBDIRECTORIES = {
 }
 ````
 
-### NBV_paper_ros2/src/perception/perception/adapters/__init__.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/adapters/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -6083,7 +6083,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/adapters/bgnet.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/adapters/bgnet.py
 
 SHA-256: `106a9bc1f5380040b5160ae37d0117b2b0993154e088006b6221cdf23c4d9d5c`
 
@@ -6161,7 +6161,7 @@ class BGNetDisparityEstimator:
         return disparity_orig, preprocessing_ms, inference_ms, postprocessing_started
 ````
 
-### NBV_paper_ros2/src/perception/perception/compute_depth.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/compute_depth.py
 
 SHA-256: `6977583b06d0b5e9240e82f95c4026c95a7f97f8e8eff6c25ea4233060f0063e`
 
@@ -6187,7 +6187,7 @@ def get_last_depth_timings():
     return {} if _default is None else _default.timings()
 ````
 
-### NBV_paper_ros2/src/perception/perception/depth_estimation.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/depth_estimation.py
 
 SHA-256: `46de5f82e0ca08c79ca051345910a16c3670e945103d1fc227328568a1d0842c`
 
@@ -6204,7 +6204,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
-from telemetry_adapters.file_sinks import PipelineFileSink
+from auv_telemetry.file_sinks import PipelineFileSink
 
 # NEW: Import message_filters for stereo synchronization
 import message_filters
@@ -6224,7 +6224,7 @@ class obstacleAvoidance(Node):
         self.frame_id = 0
         self.telemetry = PipelineFileSink(
             self.get_parameter('results_dir').value,
-            prefix='perception')
+            prefix='auv_stereo_depth')
 
         # Optimize QoS to ONLY keep the absolute newest frame (queue size 1)
         # This prevents the node from getting "stuck" processing old backlog frames
@@ -6330,7 +6330,7 @@ if __name__ == '__main__':
     main()
 ````
 
-### NBV_paper_ros2/src/perception/perception/domain/__init__.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/domain/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -6338,7 +6338,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/domain/depth.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/domain/depth.py
 
 SHA-256: `2a6f2bf74ec133666b7e96f775d336c1b57d6516789ec7cf38dcd1b5362f43c3`
 
@@ -6352,7 +6352,7 @@ class DisparityEstimator(Protocol):
         ...
 ````
 
-### NBV_paper_ros2/src/perception/perception/use_cases/__init__.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/use_cases/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -6360,7 +6360,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/perception/perception/use_cases/depth.py
+### NBV_paper_ros2/src/auv_stereo_depth/auv_stereo_depth/use_cases/depth.py
 
 SHA-256: `92da45cffbb39e0a909b21e731f341177cb9a57ed5f4c9e57b5935588ddfecde`
 
@@ -6408,7 +6408,7 @@ class StereoDepthUseCase:
         return dict(self.last_depth_timings)
 ````
 
-### NBV_paper_ros2/src/perception/setup.py
+### NBV_paper_ros2/src/auv_stereo_depth/setup.py
 
 SHA-256: `4ec135148b45c5efedf09ef8ba280f3f800cd3c65c6782fc27406fd2209a453c`
 
@@ -6416,7 +6416,7 @@ SHA-256: `4ec135148b45c5efedf09ef8ba280f3f800cd3c65c6782fc27406fd2209a453c`
 from setuptools import find_packages, setup
 from setuptools.command.build_py import build_py
 
-package_name = 'perception'
+package_name = 'auv_stereo_depth'
 
 
 class RuntimeBuild(build_py):
@@ -6426,13 +6426,13 @@ class RuntimeBuild(build_py):
         modules = super().find_package_modules(package, package_dir)
         research = {'predict', 'predict_sample', 'prediction_registry'}
         return [module for module in modules
-                if not (package == 'perception.BGNet' and module[1] in research)]
+                if not (package == 'auv_stereo_depth.BGNet' and module[1] in research)]
 
 setup(
     name=package_name,
     version='0.0.0',
     packages=find_packages(exclude=['test', '*.datasets', '*.dataloader']),
-    package_data={'perception.BGNet': ['models/Sceneflow-IRS-BGNet-Plus.pth']},
+    package_data={'auv_stereo_depth.BGNet': ['models/Sceneflow-IRS-BGNet-Plus.pth']},
     cmdclass={'build_py': RuntimeBuild},
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -6452,13 +6452,13 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'depth_estimation = perception.depth_estimation:main'
+            'depth_estimation = auv_stereo_depth.depth_estimation:main'
         ],
     },
 )
 ````
 
-### NBV_paper_ros2/src/python_planner/package.xml
+### NBV_paper_ros2/src/auv_planner_reference/package.xml
 
 SHA-256: `9b4b591ade5fa2356b1f8336badbecce3509718710182cdb544e27496a21aa4a`
 
@@ -6466,7 +6466,7 @@ SHA-256: `9b4b591ade5fa2356b1f8336badbecce3509718710182cdb544e27496a21aa4a`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>python_planner</name>
+  <name>auv_planner_reference</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -6487,7 +6487,7 @@ SHA-256: `9b4b591ade5fa2356b1f8336badbecce3509718710182cdb544e27496a21aa4a`
   <exec_depend>python3-open3d</exec_depend>
 
   <exec_depend>auv_contracts</exec_depend>
-  <exec_depend>telemetry_adapters</exec_depend>
+  <exec_depend>auv_telemetry</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
@@ -6495,7 +6495,7 @@ SHA-256: `9b4b591ade5fa2356b1f8336badbecce3509718710182cdb544e27496a21aa4a`
 </package>
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/adapters/__init__.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/adapters/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -6503,7 +6503,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/adapters/files.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/adapters/files.py
 
 SHA-256: `75379c1e3a9b056b8340f7698db346f1a100cb2a81dff36aba016f9cfac217ef`
 
@@ -6514,7 +6514,7 @@ def open_evaluation_log(results_dir):
     return open(Path(results_dir) / 'evaluation_parameters.txt', 'a')
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/adapters/octomap.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/adapters/octomap.py
 
 SHA-256: `cc638250ed661af7791246310c778dc7d4ef964a7df9ab0d61daad65266589b4`
 
@@ -6534,7 +6534,7 @@ class OctomapAdapter:
         return self._tree.write(path)
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/adapters/optimization.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/adapters/optimization.py
 
 SHA-256: `b909cd98db98e5212f8b32867587ae62eec6e6a548c913dec0126ffe0bc70287`
 
@@ -6546,7 +6546,7 @@ class ScipySolver:
         return minimize(objective, initial, **options)
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/adapters/point_cloud.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/adapters/point_cloud.py
 
 SHA-256: `a40750e34450e9d53bce5e1aeca66aad36fc5b1624010fd132f7bdd06bb6988d`
 
@@ -6587,7 +6587,7 @@ class Open3DPreprocessor:
         return CloudSnapshot(points, normals)
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/adapters/ros_output.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/adapters/ros_output.py
 
 SHA-256: `507a7a15bf956f958b44085701ee1a4e88c3b8ca0552fd955e2cf0e9cecc5041`
 
@@ -6617,7 +6617,7 @@ class RosCompletionOutput:
         self.publisher.publish(Bool(data=finished))
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/domain/__init__.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/domain/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -6625,7 +6625,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/domain/configuration.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/domain/configuration.py
 
 SHA-256: `f81c3ce9df1cb21c803386264eda3852cee46912a39c9199bd55b46f4df5b797`
 
@@ -6706,7 +6706,7 @@ def load_configuration(read_parameter):
     return Configuration(values)
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/domain/nbv_parameters.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/domain/nbv_parameters.py
 
 SHA-256: `21c26e2ee7134352061c5fca55d8cf6f83ed889cbcd23fe760f900cbfe6c3919`
 
@@ -6741,7 +6741,7 @@ DEFAULT_NBV_PARAMETERS = {
 }
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/get_NBV.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/get_NBV.py
 
 SHA-256: `bf95791456742fcb521b643d3d6925c5c0ac16a6b07c34c17fa2e524cdfce63f`
 
@@ -6762,7 +6762,7 @@ def calculate_nbv_waypoints(occupied_points, auv_position, auv_heading,
                       diagnostics=get_logger('nbv_waypoint_calculator'), clock=time)
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/planner_node.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/planner_node.py
 
 SHA-256: `4625b4e877ee25e8029d9f0b63a1229855605ff8954c75aedabf2193b0a3706b`
 
@@ -6778,7 +6778,7 @@ from sensor_msgs.msg import Image, MagneticField
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float32MultiArray
 from auv_contracts.values import PoseSample, Vector3, Quaternion, Stamp, Flag
-from telemetry_adapters.file_sinks import PlannerFileSink
+from auv_telemetry.file_sinks import PlannerFileSink
 from .domain.configuration import load_configuration
 from .use_cases.mission import InspectionMission, body_rotation, vehicle_viewpoint
 from .use_cases.nbv import calculate_nbv_waypoints
@@ -6859,7 +6859,7 @@ if __name__ == '__main__':
     main()
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/trajectory_optimization.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/trajectory_optimization.py
 
 SHA-256: `7fe07666344a2554f707e425af7745351187af21e1ddb80ac1be881ac955e88a`
 
@@ -6873,7 +6873,7 @@ def optimize_trajectory(*args, **kwargs):
     return _optimize(*args, solver=ScipySolver(), **kwargs)
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/use_cases/__init__.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/use_cases/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -6881,7 +6881,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/use_cases/mission.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/use_cases/mission.py
 
 SHA-256: `a956d79c25863051e85c66502cd8b5c0b703ec4f11754aac1c9d7933c3feb344`
 
@@ -7762,7 +7762,7 @@ class InspectionMission:
 
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/use_cases/nbv.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/use_cases/nbv.py
 
 SHA-256: `dfabfd498e9dce33716550d638cdd6b47e7a00e72fcab42b6fa5ae3b2cef52e5`
 
@@ -8125,7 +8125,7 @@ def calculate_nbv_waypoints(
     return final_waypoints
 ````
 
-### NBV_paper_ros2/src/python_planner/python_planner/use_cases/trajectory_optimization.py
+### NBV_paper_ros2/src/auv_planner_reference/auv_planner_reference/use_cases/trajectory_optimization.py
 
 SHA-256: `73c25362183c34f0185bd3c8a49f99e4d1eeb1ae2692d6586b44f437f1b4d1f8`
 
@@ -8282,14 +8282,14 @@ def optimize_trajectory(trajectory, current_position, current_yaw, velocity,
     return reference
 ````
 
-### NBV_paper_ros2/src/python_planner/setup.py
+### NBV_paper_ros2/src/auv_planner_reference/setup.py
 
 SHA-256: `a27d412776d21f5113c98d14cf32b16217250c38b9b601d9f1591d1b1c3ecd32`
 
 ````python
 from setuptools import find_packages, setup
 
-package_name = 'python_planner'
+package_name = 'auv_planner_reference'
 
 setup(
     name=package_name,
@@ -8313,13 +8313,13 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'planner_node = python_planner.planner_node:main'
+            'planner_node = auv_planner_reference.planner_node:main'
         ],
     },
 )
 ````
 
-### NBV_paper_ros2/src/python_planner/test/test_nbv_config.py
+### NBV_paper_ros2/src/auv_planner_reference/test/test_nbv_config.py
 
 SHA-256: `9d0ae0f65297fe12f0005e00726e00878fe02e6240cb53e99949ee95bda2916e`
 
@@ -8334,12 +8334,12 @@ import yaml
 
 def test_split_nbv_config_contains_supported_tuning_parameters():
     source_root = Path(__file__).parents[2]
-    tree = ast.parse((source_root / 'python_planner/python_planner/domain/nbv_parameters.py').read_text())
+    tree = ast.parse((source_root / 'auv_planner_reference/auv_planner_reference/domain/nbv_parameters.py').read_text())
     defaults = next(ast.literal_eval(node.value) for node in tree.body
                     if isinstance(node, ast.Assign)
                     and any(isinstance(target, ast.Name) and target.id == 'DEFAULT_NBV_PARAMETERS'
                             for target in node.targets))
-    config = source_root / 'bringup/config'
+    config = source_root / 'auv_bringup/config'
     tuning = yaml.safe_load((config / 'nbv_params.yaml').read_text())['planner_node']['ros__parameters']
     main = yaml.safe_load((config / 'params.yaml').read_text())['planner_node']['ros__parameters']
     assert set(tuning) == {f'nbv_{key}' for key in defaults}
@@ -8349,7 +8349,7 @@ def test_split_nbv_config_contains_supported_tuning_parameters():
     assert tuning['nbv_complexity_weight'] == 30.
 ````
 
-### NBV_paper_ros2/src/python_planner/test/test_nbv_filter_logging.py
+### NBV_paper_ros2/src/auv_planner_reference/test/test_nbv_filter_logging.py
 
 SHA-256: `f079b575f55007110ad6890660adf4d5dda5532c08be3643b9aef4a4d230d8a7`
 
@@ -8382,16 +8382,16 @@ def load_file(path, name):
     return module
 
 
-routes = load_file(ROOT / 'python_planner/route_planning.py', 'diagnostic_routes')
-defaults = load_file(ROOT / 'python_planner/domain/nbv_parameters.py', 'diagnostic_defaults')
+routes = load_file(ROOT / 'auv_planner_reference/route_planning.py', 'diagnostic_routes')
+defaults = load_file(ROOT / 'auv_planner_reference/domain/nbv_parameters.py', 'diagnostic_defaults')
 telemetry = load_file(
-    ROOT.parent / 'telemetry_adapters/telemetry_adapters/file_sinks.py',
+    ROOT.parent / 'auv_telemetry/auv_telemetry/file_sinks.py',
     'diagnostic_telemetry')
 
 
 @pytest.fixture
 def pipeline():
-    source = ROOT / 'python_planner/use_cases/nbv.py'
+    source = ROOT / 'auv_planner_reference/use_cases/nbv.py'
     tree = ast.parse(source.read_text())
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
              or (isinstance(node, ast.Assign)
@@ -8421,7 +8421,7 @@ def pipeline():
                                            KDTreeSearchParamHybrid=lambda **kwargs: None),
                   utility=SimpleNamespace(Vector3dVector=np.asarray)))
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), ns)
-    adapter_source = ROOT / 'python_planner/adapters/point_cloud.py'
+    adapter_source = ROOT / 'auv_planner_reference/adapters/point_cloud.py'
     adapter_nodes = [n for n in ast.parse(adapter_source.read_text()).body
                      if isinstance(n, ast.ClassDef)]
     ns['dataclass'] = dataclass
@@ -8499,7 +8499,7 @@ def test_pose_history_removes_matching_frontier(pipeline):
 
 def test_cluster_rejects_groups_below_minimum_sample_count(pipeline):
     ns, _ = pipeline
-    source = ast.parse((ROOT / 'python_planner/use_cases/nbv.py').read_text())
+    source = ast.parse((ROOT / 'auv_planner_reference/use_cases/nbv.py').read_text())
     function = next(n for n in source.body if isinstance(n, ast.FunctionDef)
                     and n.name == 'cluster_frontiers')
     exec(compile(ast.Module(body=[function], type_ignores=[]), '<cluster>', 'exec'), ns)
@@ -8511,7 +8511,7 @@ def test_cluster_rejects_groups_below_minimum_sample_count(pipeline):
 
 def test_node_nbv_call_matches_restored_signature(pipeline):
     ns, _ = pipeline
-    tree = ast.parse((ROOT / 'python_planner/use_cases/mission.py').read_text())
+    tree = ast.parse((ROOT / 'auv_planner_reference/use_cases/mission.py').read_text())
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
              and isinstance(node.func, ast.Attribute) and node.func.attr == 'nbv_calculator']
     assert calls
@@ -8522,7 +8522,7 @@ def test_node_nbv_call_matches_restored_signature(pipeline):
 
 def test_pipeline_passes_complexity_weight_to_gain_calculation(pipeline):
     ns, points = pipeline
-    source = ROOT / 'python_planner/use_cases/nbv.py'
+    source = ROOT / 'auv_planner_reference/use_cases/nbv.py'
     function = next(node for node in ast.parse(source.read_text()).body
                     if isinstance(node, ast.FunctionDef) and node.name == 'evaluate_viewpoint')
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), ns)
@@ -8571,7 +8571,7 @@ def test_jsonl_logs_iteration_and_handles_nonfinite_values(tmp_path):
 
 
 def node_method(name, **extra_globals):
-    source = ROOT / 'python_planner/use_cases/mission.py'
+    source = ROOT / 'auv_planner_reference/use_cases/mission.py'
     tree = ast.parse(source.read_text())
     node_class = next(node for node in tree.body if isinstance(node, ast.ClassDef))
     method = next(node for node in node_class.body
@@ -8584,7 +8584,7 @@ def node_method(name, **extra_globals):
                and node.name in ('body_rotation', 'vehicle_viewpoint')]
     exec(compile(ast.Module(body=[*helpers, method], type_ignores=[]), str(source), 'exec'), namespace)
     # Method fixtures supply the same injected ports as the production composition root.
-    output_source = ROOT / 'python_planner/adapters/ros_output.py'
+    output_source = ROOT / 'auv_planner_reference/adapters/ros_output.py'
     output_nodes = [n for n in ast.parse(output_source.read_text()).body
                     if isinstance(n, ast.ClassDef) and n.name == 'RosTrajectoryOutput']
     exec(compile(ast.Module(body=output_nodes, type_ignores=[]), str(output_source), 'exec'), namespace)
@@ -8660,7 +8660,7 @@ def test_vehicle_viewpoint_places_rotated_mount_at_requested_camera_position():
     camera = np.array([5., 8., -3.])
     target = np.array([4., 10., -4.])
     offset = np.array([.35, .1, -.25])
-    source = ROOT / 'python_planner/use_cases/mission.py'
+    source = ROOT / 'auv_planner_reference/use_cases/mission.py'
     helpers = [node for node in ast.parse(source.read_text()).body
                if isinstance(node, ast.FunctionDef) and node.name in ('body_rotation', 'vehicle_viewpoint')]
     namespace = dict(np=np, math=math)
@@ -8791,7 +8791,7 @@ def test_global_failure_or_disabled_cooldown_does_not_ban_a_target(failed, coold
     assert node.blacklisted_targets == [] and not node.force_replan
 ````
 
-### NBV_paper_ros2/src/python_planner/test/test_nbv_math.py
+### NBV_paper_ros2/src/auv_planner_reference/test/test_nbv_math.py
 
 SHA-256: `d018ee06ad7a23d4a75e7937d14136afbcf41fb8e7cd13723b8d2357fd6274f9`
 
@@ -8807,7 +8807,7 @@ import pytest
 from scipy.spatial import KDTree
 
 
-source = Path(__file__).parents[1] / 'python_planner' / 'use_cases/nbv.py'
+source = Path(__file__).parents[1] / 'auv_planner_reference' / 'use_cases/nbv.py'
 names = {'calculate_pca_complexity', 'detect_frontiers', 'cluster_frontiers',
          'evaluate_viewpoint'}
 tree = ast.parse(source.read_text())
@@ -8901,7 +8901,7 @@ def test_viewpoint_gain_matches_original_and_skips_coincident_point():
     np.testing.assert_allclose(actual, expected)
 ````
 
-### NBV_paper_ros2/src/python_planner/test/test_route_search_limits.py
+### NBV_paper_ros2/src/auv_planner_reference/test/test_route_search_limits.py
 
 SHA-256: `0369905e930436b63c5a62901df9facf08125151718ef3633a45d9ef339e7486`
 
@@ -8914,11 +8914,11 @@ from pathlib import Path
 
 import numpy as np
 
-from python_planner import route_planning as routes
+from auv_planner_reference import route_planning as routes
 
 
 def test_runtime_callers_match_restored_route_planning_signatures():
-    package = Path(__file__).parents[1] / 'python_planner'
+    package = Path(__file__).parents[1] / 'auv_planner_reference'
     checked = 0
     for source in package.rglob('*.py'):
         tree = ast.parse(source.read_text())
@@ -8961,7 +8961,7 @@ def test_resampling_handles_duplicate_and_stationary_points():
     np.testing.assert_allclose(result, stationary[:1])
 ````
 
-### NBV_paper_ros2/src/sim_bridge/package.xml
+### NBV_paper_ros2/src/auv_sim_bridge/package.xml
 
 SHA-256: `da41bd561faa484d9fafb3f53802d162e1c57d57060e60c7eb81174fd07e6f41`
 
@@ -8969,7 +8969,7 @@ SHA-256: `da41bd561faa484d9fafb3f53802d162e1c57d57060e60c7eb81174fd07e6f41`
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>sim_bridge</name>
+  <name>auv_sim_bridge</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
@@ -8995,14 +8995,14 @@ SHA-256: `da41bd561faa484d9fafb3f53802d162e1c57d57060e60c7eb81174fd07e6f41`
 </package>
 ````
 
-### NBV_paper_ros2/src/sim_bridge/setup.py
+### NBV_paper_ros2/src/auv_sim_bridge/setup.py
 
 SHA-256: `4551dbd487158ff2a231ef45f484d8e3d07ee1ae5a8f1b30ba665c0e9c2df129`
 
 ````python
 from setuptools import find_packages, setup
 
-package_name = 'sim_bridge'
+package_name = 'auv_sim_bridge'
 
 setup(
     name=package_name,
@@ -9026,13 +9026,13 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'holoocean_node = sim_bridge.holoocean_node:main'
+            'holoocean_node = auv_sim_bridge.holoocean_node:main'
         ],
     },
 )
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/adapters/__init__.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/adapters/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -9040,7 +9040,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/adapters/holoocean.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/adapters/holoocean.py
 
 SHA-256: `f17cc5232a13582fdd8f82cfbeb92927c236819c65863ca94f5b64dcdd52f858`
 
@@ -9070,7 +9070,7 @@ class HoloOceanSession:
         return self.environment.set_ocean_currents(agent, velocity)
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/adapters/ros_sensors.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/adapters/ros_sensors.py
 
 SHA-256: `ff4530056e97c1fb2e07b5432992ff87e470456aaf1837a427c1b22aa0e8e3ed`
 
@@ -9428,7 +9428,7 @@ class RosSensorOutputs:
 
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/adapters/sensor_dispatch.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/adapters/sensor_dispatch.py
 
 SHA-256: `df049626e5afb2b9e9052f967a6a346666930e309c8fe053b27f33447b0ae52b`
 
@@ -9538,7 +9538,7 @@ class SensorDispatch:
             self.diagnostics.debug("location failed: %s" % traceback.format_exc())
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/domain/__init__.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/domain/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -9546,7 +9546,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/domain/simulation.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/domain/simulation.py
 
 SHA-256: `c1ea4004e0378aed8c2632589e36d43a7ed5536dc5d3d550048f49b368e7dacb`
 
@@ -9574,7 +9574,7 @@ class CurrentField(Protocol):
     def __call__(self, location): ...
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/holoocean_node.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/holoocean_node.py
 
 SHA-256: `8f77a6e0b0b81f5f3b2cdc60b15193e3a772be7f561dc346dcf82fa3dda33aef`
 
@@ -9739,7 +9739,7 @@ if __name__ == "__main__":
     main()
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/use_cases/__init__.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/use_cases/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -9747,7 +9747,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/use_cases/current_field.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/use_cases/current_field.py
 
 SHA-256: `7b8148b3627f4411c0ef949ad3c484712d0da003c64c3116f448d724ca48c3e4`
 
@@ -9766,7 +9766,7 @@ def vortex_field(location):
     return [3*dx, 3*dy, 3*dz]
 ````
 
-### NBV_paper_ros2/src/sim_bridge/sim_bridge/use_cases/simulation.py
+### NBV_paper_ros2/src/auv_sim_bridge/auv_sim_bridge/use_cases/simulation.py
 
 SHA-256: `1daca219aac5123b03db2a2cb6fe3e2510edf94ca1df8d336bcd5a92a4a4225b`
 
@@ -9818,14 +9818,14 @@ class SimulationRunner:
 
 ````
 
-### NBV_paper_ros2/src/telemetry_adapters/package.xml
+### NBV_paper_ros2/src/auv_telemetry/package.xml
 
 SHA-256: `08aec4d91e9194b99fa9dee34f36176985f7c38e4800027aff74bc1693db6c02`
 
 ````xml
 <?xml version="1.0"?>
 <package format="3">
-  <name>telemetry_adapters</name><version>0.0.0</version>
+  <name>auv_telemetry</name><version>0.0.0</version>
   <description>File-backed AUV telemetry adapters</description>
   <maintainer email="metinegearal@gmail.com">metin-ege</maintainer>
   <license>TODO: License declaration</license>
@@ -9835,7 +9835,7 @@ SHA-256: `08aec4d91e9194b99fa9dee34f36176985f7c38e4800027aff74bc1693db6c02`
 </package>
 ````
 
-### NBV_paper_ros2/src/telemetry_adapters/resource/telemetry_adapters
+### NBV_paper_ros2/src/auv_telemetry/resource/auv_telemetry
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -9843,31 +9843,31 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/telemetry_adapters/setup.cfg
+### NBV_paper_ros2/src/auv_telemetry/setup.cfg
 
 SHA-256: `d12a53e369080f86668e2d61997db027e71155accf9ebdbed936373b5ddaddf4`
 
 ````ini
 [develop]
-script_dir=$base/lib/telemetry_adapters
+script_dir=$base/lib/auv_telemetry
 [install]
-install_scripts=$base/lib/telemetry_adapters
+install_scripts=$base/lib/auv_telemetry
 ````
 
-### NBV_paper_ros2/src/telemetry_adapters/setup.py
+### NBV_paper_ros2/src/auv_telemetry/setup.py
 
 SHA-256: `9bd2c4228235131e2f5cedf501506da499525e507e8af22b45d5327ddccd44c3`
 
 ````python
 from setuptools import find_packages, setup
-setup(name='telemetry_adapters', version='0.0.0', packages=find_packages(),
-      data_files=[('share/ament_index/resource_index/packages', ['resource/telemetry_adapters']),
-                  ('share/telemetry_adapters', ['package.xml'])],
+setup(name='auv_telemetry', version='0.0.0', packages=find_packages(),
+      data_files=[('share/ament_index/resource_index/packages', ['resource/auv_telemetry']),
+                  ('share/auv_telemetry', ['package.xml'])],
       install_requires=['setuptools'], zip_safe=True,
       description='File-backed AUV telemetry adapters', license='TODO: License declaration')
 ````
 
-### NBV_paper_ros2/src/telemetry_adapters/telemetry_adapters/__init__.py
+### NBV_paper_ros2/src/auv_telemetry/auv_telemetry/__init__.py
 
 SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
@@ -9875,7 +9875,7 @@ SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
 
 ````
 
-### NBV_paper_ros2/src/telemetry_adapters/telemetry_adapters/file_sinks.py
+### NBV_paper_ros2/src/auv_telemetry/auv_telemetry/file_sinks.py
 
 SHA-256: `62acb3f9bdba6f5a809df0e10e8b5c7807310a10fe240f3f7ac220d972295e13`
 
@@ -10031,7 +10031,7 @@ class MidrunLogger:
 
 class PipelineFileSink:
     """Perception depends only on the timing role."""
-    def __init__(self, results_dir='results', prefix='perception'):
+    def __init__(self, results_dir='results', prefix='auv_stereo_depth'):
         self._writer = MidrunLogger(results_dir, prefix, pipeline_only=True)
     def record_stage(self, *args, **kwargs):
         return self._writer.record_stage(*args, **kwargs)

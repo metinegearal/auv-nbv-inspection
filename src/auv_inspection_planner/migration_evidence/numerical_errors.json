@@ -1,0 +1,297 @@
+{
+  "spline_0_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_0_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_0_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_0_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_1_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_1_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_1_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_1_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_2_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_2_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_2_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_2_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_3_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_3_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_3_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_3_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_4_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_4_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_4_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_4_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_8_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_8_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_8_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_8_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_30_0.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_30_0.1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_30_2.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_30_50.0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "spline_duplicates_yaw_wrap": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "pca_random": {
+    "max_absolute_error": 1.1102230246251565e-16,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "preprocessing_random": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_random_0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_random_1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "pca_plane": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "preprocessing_plane": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_plane_0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_plane_1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "pca_corner": {
+    "max_absolute_error": 1.5265566588595902e-16,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "preprocessing_corner": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_corner_0": {
+    "max_absolute_error": 1.7763568394002505e-15,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_corner_1": {
+    "max_absolute_error": 4.440892098500626e-16,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "pca_line": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "preprocessing_line": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_line_0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_line_1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "pca_empty": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "preprocessing_empty": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_empty_0": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "nbv_empty_1": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "optimizer_2": {
+    "max_absolute_error": 0.0,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "optimizer_4": {
+    "max_absolute_error": 7.389834077997648e-09,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "optimizer_10": {
+    "max_absolute_error": 6.974897914791e-08,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "optimizer_unsafe": {
+    "max_absolute_error": 0.0,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "optimizer_controls_4_40": {
+    "max_absolute_error": 1.0179621590111765e-09,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "optimizer_controls_10_40": {
+    "max_absolute_error": 5.019006947826199e-07,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "optimizer_controls_40_3": {
+    "max_absolute_error": 8.426628284041726e-10,
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "octomap_rays": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "recorded_map_extraction": {
+    "max_absolute_error": 0.0,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "recorded_map_nbvs": {
+    "max_absolute_error": 5.329070518200751e-15,
+    "atol": 1e-09,
+    "rtol": 1e-09
+  }
+}

@@ -1,0 +1,20 @@
+Starting >>> active_inspection_planner
+--- stderr: active_inspection_planner
+CMake Deprecation Warning at .dependencies/open3d-devel-linux-x86_64-cxx11-abi-0.19.0/lib/cmake/Open3D/Open3DConfig.cmake:18 (cmake_policy):
+  The OLD behavior for policy CMP0072 will be removed from a future version
+  of CMake.
+
+  The cmake-policies(7) manual explains that the OLD behaviors of all
+  policies are deprecated and that a policy should be set to OLD only under
+  specific short-term circumstances.  Projects should be ported to the NEW
+  behavior and not rely on setting a policy to OLD.
+Call Stack (most recent call first):
+  CMakeLists.txt:28 (find_package)
+
+
+---
+Finished <<< active_inspection_planner [3.10s]
+Could not connect: Operation not permitted
+
+Summary: 1 package finished [3.32s]
+  1 package had stderr output: active_inspection_planner

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "coordinate_frame": "map",
+  "scope": "mission",
+  "source_log": "/home/metin-ege/AIEngineering/RoboticFocus/HoloSystem/NBV_paper_ros2/results/planner_nbv_filters.jsonl",
+  "spheres": []
+}

@@ -10,20 +10,20 @@ import numpy as np
 import pytest
 
 SOURCE = Path(__file__).resolve().parents[3]
-for package in ('auv_contracts', 'perception', 'python_planner', 'sim_bridge',
-                'benchmark_evaluator', 'auv_experiments', 'bringup'):
+for package in ('auv_contracts', 'auv_stereo_depth', 'auv_planner_reference', 'auv_sim_bridge',
+                'auv_benchmark', 'auv_experiments', 'auv_bringup'):
     sys.path.insert(0, str(SOURCE / package))
 
 from auv_contracts.values import Configuration, CameraCalibration, Trajectory, ArrayEvent
 from auv_contracts.mission_results import distance_record, distance_from_records
-from perception.use_cases.depth import StereoDepthUseCase
-from sim_bridge.use_cases.simulation import SimulationRunner
-from sim_bridge.domain.simulation import Command
-from sim_bridge.adapters.sensor_dispatch import SensorDispatch
-from benchmark_evaluator.use_cases.map_evaluation import EvaluateMap
-from benchmark_evaluator.use_cases.trajectory_evaluation import TrajectoryEvaluation
+from auv_stereo_depth.use_cases.depth import StereoDepthUseCase
+from auv_sim_bridge.use_cases.simulation import SimulationRunner
+from auv_sim_bridge.domain.simulation import Command
+from auv_sim_bridge.adapters.sensor_dispatch import SensorDispatch
+from auv_benchmark.use_cases.map_evaluation import EvaluateMap
+from auv_benchmark.use_cases.trajectory_evaluation import TrajectoryEvaluation
 from auv_experiments.trial_policy import TrialObjective
-from bringup.configuration import apply_trial_overrides
+from auv_bringup.configuration import apply_trial_overrides
 
 
 class Diagnostics:
@@ -166,7 +166,7 @@ def test_python_policy_modules_have_no_framework_or_io_imports():
                  'torch', 'torchvision', 'open3d', 'pyoctomap', 'holoocean', 'cv2',
                  'matplotlib', 'subprocess', 'os', 'pathlib'}
     paths = list((SOURCE / 'auv_contracts/auv_contracts').glob('*.py'))
-    for package in ('python_planner', 'perception', 'sim_bridge', 'benchmark_evaluator'):
+    for package in ('auv_planner_reference', 'auv_stereo_depth', 'auv_sim_bridge', 'auv_benchmark'):
         for layer in ('domain', 'use_cases'):
             paths.extend((SOURCE / package / package / layer).glob('*.py'))
     paths.append(SOURCE / 'auv_experiments/auv_experiments/trial_policy.py')

@@ -1,5 +1,5 @@
 import optuna
-from benchmark_evaluator.benchmark_evaluator import evaluate_map_accuracy
+from auv_benchmark.auv_benchmark import evaluate_map_accuracy
 from .runner_adapter import RosTrialRunner
 from .trial_policy import TrialObjective
 

@@ -1,4 +1,4 @@
-# Package Architecture Audit: bringup
+# Package Architecture Audit: auv_bringup
 
 ## Current Metrics
 
@@ -15,9 +15,9 @@ Counts use the observed source/deployment graph, not ROS topic flow. See [Phase 
 ## Violations Found
 | ID | Rule Broken | File & Line / Symbol | Concrete Issue | Actor / Architectural Impact |
 |---|---|---|---|---|
-| <a id="v-01"></a>V-01 | ADP | `bringup/launch/mapper.launch.py:77` / `benchmark observer launch` | **Critical.** Launch depends on benchmark_evaluator while its optimizer launches this same bringup component; perception/planner launch paths also close the longer telemetry cycles. | Production composition is cyclically coupled to experiment orchestration. Launching an observer is legitimate; placing the reverse launcher in that observer release causes the cycle. |
-| <a id="v-02"></a>V-02 | REP (dependency metadata) | `bringup/package.xml:11` / `dependency declarations` | **Moderate.** Manifest has test dependencies but none for launch, launch_ros, ament_index_python or the five launched scoped components. | A consumer installing bringup cannot rely on the declared closure to obtain the executables it orchestrates. |
-| <a id="v-03"></a>V-03 | CCP | `bringup/launch/mapper.launch.py:11` / `configuration resource contract` | **Moderate.** The launch package owns ROS configuration files whose exact node keys and source-tree layout are read and rewritten by benchmark_evaluator/optuna_optimizer.py:12 and :23. | Deployment renames and research parameter injection require coordinated edits across two components; configuration translation needs one owner. |
+| <a id="v-01"></a>V-01 | ADP | `auv_bringup/launch/mapper.launch.py:77` / `benchmark observer launch` | **Critical.** Launch depends on auv_benchmark while its optimizer launches this same auv_bringup component; auv_stereo_depth/planner launch paths also close the longer telemetry cycles. | Production composition is cyclically coupled to experiment orchestration. Launching an observer is legitimate; placing the reverse launcher in that observer release causes the cycle. |
+| <a id="v-02"></a>V-02 | REP (dependency metadata) | `auv_bringup/package.xml:11` / `dependency declarations` | **Moderate.** Manifest has test dependencies but none for launch, launch_ros, ament_index_python or the five launched scoped components. | A consumer installing auv_bringup cannot rely on the declared closure to obtain the executables it orchestrates. |
+| <a id="v-03"></a>V-03 | CCP | `auv_bringup/launch/mapper.launch.py:11` / `configuration resource contract` | **Moderate.** The launch package owns ROS configuration files whose exact node keys and source-tree layout are read and rewritten by auv_benchmark/optuna_optimizer.py:12 and :23. | Deployment renames and research parameter injection require coordinated edits across two components; configuration translation needs one owner. |
 
 ## Proposed Structural Boundary
 - Interfaces to extract: No abstract wrapper around LaunchDescription is needed. Extract a plain LaunchSpec/ExperimentConfig contract for the external experiment runner; keep policy-owned parameter objects in their policy components.
@@ -34,7 +34,7 @@ graph LR
  GEN --> CFG[params.yaml / nbv_params.yaml / holoocean_config.json]
  GEN --> LD[LaunchDescription]
  LD --> N[launch_ros.Node]
- N --> P[sim_bridge / perception / motion_control / python_planner / benchmark_evaluator]
+ N --> P[auv_sim_bridge / auv_stereo_depth / auv_motion_control / auv_planner_reference / auv_benchmark]
  OPT[external optimizer] -. reads exact keys and starts launch .-> GEN
 ```
 
@@ -49,7 +49,7 @@ graph LR
  L[generate_launch_description and config loader]
  R[ROS / simulator / logger adapter factories]
  end
- subgraph UseCases[Use Cases owned outside bringup]
+ subgraph UseCases[Use Cases owned outside auv_bringup]
  U[Planning / Motion / Depth / Evaluation]
  end
  subgraph Entities[Entities and configuration values]
@@ -73,18 +73,18 @@ Actor labels are inferred responsibilities, not verified organizational roles. S
 
 | File | Current defined classes / top-level functions | Ideal placement / diagnostic disposition |
 |---|---|---|
-| `bringup/bringup/__init__.py` | No classes/top-level Python functions | Empty package marker; no executable policy or class interaction to partition. |
-| `bringup/config/holoocean_config copy.json` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
-| `bringup/config/holoocean_config.json` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
-| `bringup/config/nbv_params.yaml` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
-| `bringup/config/params.yaml` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
-| `bringup/launch/mapper.launch.py` | `generate_launch_description:8` | Outer composition root; keep framework dependencies here. |
-| `bringup/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `bringup/setup.cfg` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `bringup/setup.py` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `bringup/test/test_copyright.py` | `test_copyright:23` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
-| `bringup/test/test_flake8.py` | `test_flake8:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
-| `bringup/test/test_pep257.py` | `test_pep257:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_bringup/auv_bringup/__init__.py` | No classes/top-level Python functions | Empty package marker; no executable policy or class interaction to partition. |
+| `auv_bringup/config/holoocean_config copy.json` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
+| `auv_bringup/config/holoocean_config.json` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
+| `auv_bringup/config/nbv_params.yaml` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
+| `auv_bringup/config/params.yaml` | No classes/top-level Python functions | Configuration data at composition boundary; version/validate schema and translate to policy values. |
+| `auv_bringup/launch/mapper.launch.py` | `generate_launch_description:8` | Outer composition root; keep framework dependencies here. |
+| `auv_bringup/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_bringup/setup.cfg` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_bringup/setup.py` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_bringup/test/test_copyright.py` | `test_copyright:23` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_bringup/test/test_flake8.py` | `test_flake8:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_bringup/test/test_pep257.py` | `test_pep257:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
 
 ## Class Counting Evidence
 
@@ -94,7 +94,7 @@ No locally defined production classes. A=0/0 is undefined.
 
 The following module diagrams are static Python AST call/name and class-containment maps. Dotted edges indicate containment, solid edges an explicit local call. Repeated method names are resolved within the containing class; nested functions belong to their lexical owner. Dynamic dispatch, callbacks registered for later execution and arbitrary imported calls are not inferred as exact call edges. Package diagrams above supply the cross-module and C++ relationships. See [source coverage](../source_coverage.md) for all imports, C++ includes and function symbols.
 
-### `bringup/__init__.py`
+### `auv_bringup/__init__.py`
 
 Ideal placement: Empty package marker; no executable policy or class interaction to partition.
 

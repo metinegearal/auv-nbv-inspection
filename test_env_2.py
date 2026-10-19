@@ -1,7 +1,17 @@
 import argparse
 import csv
+import os
 from pathlib import Path
 import sys
+
+# Open3D's native Wayland startup can load a GTK/libdecor plugin that expects
+# obsolete GNOME font settings and then fails to initialize GLEW. Use XWayland
+# when available, before importing Open3D or initializing any GUI libraries.
+if sys.platform == "linux" and os.environ.get("DISPLAY") and (
+        os.environ.get("WAYLAND_DISPLAY") or os.environ.get("XDG_SESSION_TYPE") == "wayland"):
+    os.environ["GDK_BACKEND"] = "x11"
+    os.environ["XDG_SESSION_TYPE"] = "x11"
+    os.environ.pop("WAYLAND_DISPLAY", None)
 
 import numpy as np
 import open3d as o3d
@@ -9,14 +19,19 @@ from scipy.spatial import KDTree
 import pyoctomap as octomap
 
 PROJECT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(PROJECT_DIR / "src" / "python_planner"))
-from python_planner.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
-from python_planner.use_cases.nbv import (
+sys.path.insert(0, str(PROJECT_DIR / "src" / "auv_planner_reference"))
+sys.path.insert(0, str(PROJECT_DIR / "src" / "auv_benchmark"))
+from auv_benchmark.adapters.permanent_bans import (
+    BAN_SPHERES_FILENAME, PermanentBanRecorder, load_ban_spheres, target_is_banned,
+)
+from auv_planner_reference.domain.nbv_parameters import DEFAULT_NBV_PARAMETERS
+from auv_planner_reference.domain.seabed import SeabedEstimate
+from auv_planner_reference.use_cases.nbv import (
     calculate_pca_complexity, detect_frontiers, cluster_frontiers,
     generate_cone_viewpoints, evaluate_viewpoint, calculate_kinematic_cost,
     normalize_array, select_upward_view_axis,
 )
-from python_planner.route_planning import (
+from auv_planner_reference.route_planning import (
     inflate_occupied, plan_multi_waypoint_route, generate_smooth_trajectory,
     resample_trajectory_by_distance, path_is_collision_free,
 )
@@ -159,10 +174,48 @@ def filter_observed_clusters(clusters, trajectory, yaws, parameters):
 
 
 def add_sphere(geometries, position, radius, color):
-    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius)
+    # Tiny candidate markers do not need the default 1,520-triangle sphere.
+    sphere = o3d.geometry.TriangleMesh.create_sphere(
+        radius=radius, resolution=6 if radius <= 0.08 else 12)
+    sphere.compute_vertex_normals()
     sphere.translate(position)
     sphere.paint_uniform_color(color)
     geometries.append(sphere)
+
+def add_ban_spheres(geometries, spheres):
+    """Draw wire volumes so the mapped surface remains visible inside each ban."""
+    for value in spheres:
+        mesh = o3d.geometry.TriangleMesh.create_sphere(radius=value['radius_m'], resolution=12)
+        mesh.translate(value['center'])
+        wire = o3d.geometry.LineSet.create_from_triangle_mesh(mesh)
+        wire.paint_uniform_color([.7, .05, .05])
+        geometries.append(wire)
+
+def load_viewer_bans(map_path, override=None):
+    """Refresh the default benchmark snapshot; explicit snapshots stay frozen."""
+    if override is None:
+        recorder = PermanentBanRecorder(Path(map_path).parent)
+        recorder.poll()
+    path = Path(override) if override is not None else Path(map_path).parent / BAN_SPHERES_FILENAME
+    return path, load_ban_spheres(path)
+
+
+def batch_marker_meshes(geometries):
+    """Combine sphere markers into one draw object, retaining per-vertex colors."""
+    meshes = [g for g in geometries if isinstance(g, o3d.geometry.TriangleMesh)]
+    if not meshes:
+        return geometries
+    offsets = np.cumsum([0] + [len(mesh.vertices) for mesh in meshes[:-1]])
+    markers = o3d.geometry.TriangleMesh()
+    markers.vertices = o3d.utility.Vector3dVector(
+        np.concatenate([np.asarray(mesh.vertices) for mesh in meshes]))
+    markers.triangles = o3d.utility.Vector3iVector(np.concatenate([
+        np.asarray(mesh.triangles) + offset for mesh, offset in zip(meshes, offsets)]))
+    markers.vertex_colors = o3d.utility.Vector3dVector(
+        np.concatenate([np.asarray(mesh.vertex_colors) for mesh in meshes]))
+    markers.vertex_normals = o3d.utility.Vector3dVector(
+        np.concatenate([np.asarray(mesh.vertex_normals) for mesh in meshes]))
+    return [g for g in geometries if not isinstance(g, o3d.geometry.TriangleMesh)] + [markers]
 
 
 def calculate_future_trajectory(auv_position, auv_yaw, winners, occupied_points, resolution):
@@ -220,10 +273,14 @@ def main():
     parser = argparse.ArgumentParser(description="Visualize NBV selection after the latest trajectory.")
     parser.add_argument("--trajectory-csv", type=Path, help="Override the latest trajectory CSV.")
     parser.add_argument("--map", type=Path, default=PROJECT_DIR / "results" / "final_map_ros2.bt")
+    parser.add_argument("--ban-spheres", type=Path,
+                        help="Saved permanent ban spheres (default: alongside the map).")
     parser.add_argument("--no-gui", action="store_true", help="Evaluate without opening Open3D.")
     parser.add_argument("--future-trajectory", action=argparse.BooleanOptionalAction,
                         default=False, help="Calculate and show the planner's future path (default: off).")
     args = parser.parse_args()
+    ban_path, ban_spheres = load_viewer_bans(args.map, args.ban_spheres)
+    print(f"Permanent ban spheres: {len(ban_spheres)} from {ban_path}")
     parameters = DEFAULT_NBV_PARAMETERS
     trajectory_path, trajectory = load_latest_trajectory(PROJECT_DIR / "results", args.trajectory_csv)
     yaws = trajectory_yaws(trajectory)
@@ -234,21 +291,30 @@ def main():
     print("CSV has no measured yaw: viewing headings are estimated from horizontal travel.")
 
     pcd, occupied_points, resolution = load_real_octomap(str(args.map), auv_position, return_map=True)
+    seabed = SeabedEstimate(resolution)
+    if parameters['seabed_enabled']:
+        seabed.update(occupied_points)
+        print(f"Seabed floor Z from map: {seabed.mean_z}; map samples: {seabed.sample_count}")
     points, normals = np.asarray(pcd.points), np.asarray(pcd.normals)
     print(f"Loaded {len(points)} valid pipe voxels.")
     complexities = calculate_pca_complexity(pcd, k=parameters['pca_neighbors'])
     frontier_indices = detect_frontiers(
         pcd, k=parameters['frontier_neighbors'],
-        angle_threshold_deg=parameters['frontier_angle_threshold_deg'])
+        angle_threshold_deg=80,
+        min_neighbors=2)
     clusters = cluster_frontiers(
         points, normals, frontier_indices, fov_radius=parameters['cluster_fov_radius'],
         max_angle_deg=parameters['cluster_max_angle_deg'],
         min_samples=parameters['cluster_min_samples'])
     clusters, observed = filter_observed_clusters(clusters, trajectory, yaws, parameters)
     print(f"Coverage filter: {len(observed)} observed clusters removed; {len(clusters)} remain.")
+    banned_clusters = [c for c in clusters if target_is_banned(c['centroid'], ban_spheres)]
+    clusters = [c for c in clusters if not target_is_banned(c['centroid'], ban_spheres)]
+    print(f"Permanent ban filter: {len(banned_clusters)} clusters removed; {len(clusters)} remain.")
 
     pcd.paint_uniform_color([0.5, 0.5, 0.5])
     geometries = [pcd]
+    add_ban_spheres(geometries, ban_spheres)
     path = o3d.geometry.LineSet()
     path.points = o3d.utility.Vector3dVector(trajectory)
     segments = np.column_stack((np.arange(len(trajectory) - 1), np.arange(1, len(trajectory))))
@@ -279,7 +345,10 @@ def main():
         for candidate in candidates:
             gain = evaluate_viewpoint(
                 candidate['position'], cluster['points'], cluster['normals'],
-                complexities[cluster['global_indices']], complexity_weight=parameters['complexity_weight'])
+                complexities[cluster['global_indices']], complexity_weight=parameters['complexity_weight'],
+                seabed_z=seabed.mean_z if parameters['seabed_enabled'] else None,
+                seabed_decay_height=parameters['seabed_decay_height'],
+                seabed_penalty_strength=parameters['seabed_penalty_strength'])
             if gain < parameters['min_raw_gain']:
                 continue
             cost = calculate_kinematic_cost(
@@ -322,7 +391,7 @@ def main():
         print("No NBV candidates remain after coverage and gain filtering.")
 
     if args.future_trajectory:
-        print("Calculating future trajectory with python_planner...")
+        print("Calculating future trajectory with auv_planner_reference...")
         future = calculate_future_trajectory(
             auv_position, yaws[-1], ranked, occupied_points, resolution)
         if len(future) > 1:
@@ -337,16 +406,22 @@ def main():
     if not args.no_gui:
         print("Gray: Surface | Green: Trajectory/start | Blue: Last point/AUV | Red: Remaining frontiers")
         print("Magenta: Candidates | Yellow: Cluster winners | Cyan: Global best NBV | Labels: Cluster IDs")
+        print("Dark red wire spheres: Permanent ban regions (saved map centres and radii)")
         if args.future_trajectory:
             print("Orange: Collision-checked future trajectory/end")
 
         def add_cluster_labels(visualizer):
-            for winner in winners.values():
-                label_position = winner['position'] + np.array([0.0, 0.0, 0.25])
-                label = f"Cluster {winner['cluster_id']}"
-                if winner is best:
-                    label += " (best)"
-                visualizer.add_3d_label(label_position, label)
+            pass
+            # for sphere in ban_spheres:
+            #     radius = sphere['radius_m']
+            #     visualizer.add_3d_label(np.asarray(sphere['center']) + [0, 0, radius + .1],
+            #                            f"Permanent ban ({radius:g} m)")
+            # for winner in winners.values():
+            #     label_position = winner['position'] + np.array([0.0, 0.0, 0.25])
+            #     label = f"Cluster {winner['cluster_id']}"
+            #     if winner is best:
+            #         label += " (best)"
+            #     visualizer.add_3d_label(label_position, label)
 
         # The GUI visualizer supports screen-facing text anchored to 3D positions.
         o3d.visualization.draw(

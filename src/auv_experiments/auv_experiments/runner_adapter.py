@@ -4,12 +4,12 @@ import signal
 import os
 from pathlib import Path
 import yaml
-from bringup.configuration import apply_trial_overrides
+from auv_bringup.configuration import apply_trial_overrides
 from auv_contracts.mission_results import MISSION_STATS_FILENAME, distance_from_records
 
 
 ROS_WORKSPACE = Path(__file__).resolve().parents[3]
-BASE_PARAMS_PATH = ROS_WORKSPACE / 'src' / 'bringup' / 'config' / 'params.yaml'
+BASE_PARAMS_PATH = ROS_WORKSPACE / 'src' / 'auv_bringup' / 'config' / 'params.yaml'
 TEMP_PARAMS_PATH = ROS_WORKSPACE / 'temp_optuna_params.yaml'
 MAP_PATH = ROS_WORKSPACE / 'results' / 'final_map_ros2.bt'
 MISSION_STATS_PATH = ROS_WORKSPACE / 'results' / MISSION_STATS_FILENAME
@@ -39,7 +39,7 @@ class RosTrialRunner:
         cmd = (
             f"source /opt/ros/jazzy/setup.bash && "
             f"source {ROS_WORKSPACE}/install/setup.bash && "
-            f"ros2 launch bringup mapper.launch.py params_file:={TEMP_PARAMS_PATH}"
+            f"ros2 launch auv_bringup mapper.launch.py params_file:={TEMP_PARAMS_PATH}"
         )
 
         print("Launching ROS 2 stack...")

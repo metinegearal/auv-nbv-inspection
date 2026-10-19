@@ -1,4 +1,4 @@
-# Package Architecture Audit: benchmark_evaluator
+# Package Architecture Audit: auv_benchmark
 
 ## Current Metrics
 
@@ -15,18 +15,18 @@ Counts use the observed source/deployment graph, not ROS topic flow. See [Phase 
 ## Violations Found
 | ID | Rule Broken | File & Line / Symbol | Concrete Issue | Actor / Architectural Impact |
 |---|---|---|---|---|
-| <a id="v-01"></a>V-01 | ADP / SDP | `benchmark_evaluator/benchmark_evaluator/optuna_optimizer.py:63` / `objective launch command` | **Critical.** The experiment driver names bringup, which launches benchmark_evaluator, perception and python_planner; the latter two import this package. This closes three deployment cycles. I rises from 0.250 to 0.833 on benchmark_evaluator → bringup. | Experiment launcher and production runtime cannot be independently organized/released without carrying the cyclic deployment contract. |
-| <a id="v-02"></a>V-02 | CCP / CRP / SAP | `benchmark_evaluator/benchmark_evaluator/midrun_logger.py:10` / `MidrunLogger release placement` | **Critical.** Planner and perception import one concrete logger from a component also containing ROS benchmarking, visualization, OctoMap scoring and Optuna. No abstract telemetry contract protects these stable incoming dependencies (A=0, D=0.750). | Production telemetry consumers depend on an experiment/reporting release they do not otherwise reuse. |
-| <a id="v-03"></a>V-03 | ISP | `benchmark_evaluator/benchmark_evaluator/midrun_logger.py:13` / `MidrunLogger mode flags` | **Moderate.** pipeline_only and trajectory_only select subsets of a single logger API and file initialization, but all clients depend on the full filter/depth/iteration/trajectory implementation. | Perception needs stage timing while planning and evaluation need different event sets; unrelated event-schema changes enlarge each consumer dependency. |
-| <a id="v-04"></a>V-04 | SRP / DIP | `benchmark_evaluator/benchmark_evaluator/run_baselines.py:12` / `BenchmarkLogger` | **Moderate.** The ROS node computes distance, timing, heading and trajectory error, persists CSV/text, generates figures and performs saving during destroy_node (lines 178, 283, 299, 352). | Evaluation researchers, report designers and ROS lifecycle maintainers change one class; IO is embedded in metric use cases. |
-| <a id="v-05"></a>V-05 | SRP / DIP / OCP | `benchmark_evaluator/benchmark_evaluator/benchmark_evaluator.py:7` / `evaluate_map_accuracy` | **Moderate.** Scoring loads fixed map/GT paths, applies scene-specific transforms, performs alignment and presents output. single_station at line 9 and branches at lines 13 and 20 hardcode scenario variants. | Adding an experiment scene or changing storage/viewing requires editing the scoring routine; metrics cannot be invoked on supplied point sets alone. |
-| <a id="v-06"></a>V-06 | SRP / DIP | `benchmark_evaluator/benchmark_evaluator/optuna_optimizer.py:38` / `objective` | **Moderate.** Trial policy samples parameters, rewrites ROS config, deletes prior result artifacts, constructs a shell command, manages a process group and parses mission results. | Research objective changes and deployment/process changes share one function; TrialRunner and structured TrialResult boundaries are absent. |
-| <a id="v-07"></a>V-07 | CCP / REP (contract ownership) | `benchmark_evaluator/benchmark_evaluator/run_baselines.py:307` / `optuna_mission_stats.txt` | **Moderate.** Run completion and optimizer results are coupled through a concrete filename and presentation text (optimizer lines 15, 80, 105). The producer also emits human-oriented report wording. | Changing report wording or file protocol requires coordinated changes in trial execution; an explicit versioned result schema is missing. |
-| <a id="v-08"></a>V-08 | REP (dependency metadata) | `benchmark_evaluator/package.xml:10` / `dependency declarations` | **Moderate.** Manifest declares matplotlib but omits ROS, NumPy, Open3D, pyoctomap, Optuna, YAML and pandas dependencies used by shipped modules; setup.py only declares setuptools and matplotlib. | Consumers of this reuse unit receive incomplete installation requirements; infer neither a release history nor a licensing conclusion from placeholders. |
+| <a id="v-01"></a>V-01 | ADP / SDP | `auv_benchmark/auv_benchmark/optuna_optimizer.py:63` / `objective launch command` | **Critical.** The experiment driver names auv_bringup, which launches auv_benchmark, auv_stereo_depth and auv_planner_reference; the latter two import this package. This closes three deployment cycles. I rises from 0.250 to 0.833 on auv_benchmark → auv_bringup. | Experiment launcher and production runtime cannot be independently organized/released without carrying the cyclic deployment contract. |
+| <a id="v-02"></a>V-02 | CCP / CRP / SAP | `auv_benchmark/auv_benchmark/midrun_logger.py:10` / `MidrunLogger release placement` | **Critical.** Planner and auv_stereo_depth import one concrete logger from a component also containing ROS benchmarking, visualization, OctoMap scoring and Optuna. No abstract telemetry contract protects these stable incoming dependencies (A=0, D=0.750). | Production telemetry consumers depend on an experiment/reporting release they do not otherwise reuse. |
+| <a id="v-03"></a>V-03 | ISP | `auv_benchmark/auv_benchmark/midrun_logger.py:13` / `MidrunLogger mode flags` | **Moderate.** pipeline_only and trajectory_only select subsets of a single logger API and file initialization, but all clients depend on the full filter/depth/iteration/trajectory implementation. | Perception needs stage timing while planning and evaluation need different event sets; unrelated event-schema changes enlarge each consumer dependency. |
+| <a id="v-04"></a>V-04 | SRP / DIP | `auv_benchmark/auv_benchmark/run_baselines.py:12` / `BenchmarkLogger` | **Moderate.** The ROS node computes distance, timing, heading and trajectory error, persists CSV/text, generates figures and performs saving during destroy_node (lines 178, 283, 299, 352). | Evaluation researchers, report designers and ROS lifecycle maintainers change one class; IO is embedded in metric use cases. |
+| <a id="v-05"></a>V-05 | SRP / DIP / OCP | `auv_benchmark/auv_benchmark/auv_benchmark.py:7` / `evaluate_map_accuracy` | **Moderate.** Scoring loads fixed map/GT paths, applies scene-specific transforms, performs alignment and presents output. single_station at line 9 and branches at lines 13 and 20 hardcode scenario variants. | Adding an experiment scene or changing storage/viewing requires editing the scoring routine; metrics cannot be invoked on supplied point sets alone. |
+| <a id="v-06"></a>V-06 | SRP / DIP | `auv_benchmark/auv_benchmark/optuna_optimizer.py:38` / `objective` | **Moderate.** Trial policy samples parameters, rewrites ROS config, deletes prior result artifacts, constructs a shell command, manages a process group and parses mission results. | Research objective changes and deployment/process changes share one function; TrialRunner and structured TrialResult boundaries are absent. |
+| <a id="v-07"></a>V-07 | CCP / REP (contract ownership) | `auv_benchmark/auv_benchmark/run_baselines.py:307` / `optuna_mission_stats.txt` | **Moderate.** Run completion and optimizer results are coupled through a concrete filename and presentation text (optimizer lines 15, 80, 105). The producer also emits human-oriented report wording. | Changing report wording or file protocol requires coordinated changes in trial execution; an explicit versioned result schema is missing. |
+| <a id="v-08"></a>V-08 | REP (dependency metadata) | `auv_benchmark/package.xml:10` / `dependency declarations` | **Moderate.** Manifest declares matplotlib but omits ROS, NumPy, Open3D, pyoctomap, Optuna, YAML and pandas dependencies used by shipped modules; setup.py only declares setuptools and matplotlib. | Consumers of this reuse unit receive incomplete installation requirements; infer neither a release history nor a licensing conclusion from placeholders. |
 
 ## Proposed Structural Boundary
 - Interfaces to extract: `PipelineTimingSink`, `FilterEventSink`, `TrajectorySink`, `IterationSink`, `TrialRunner`, `EvaluationMapSource`, `GroundTruthSource`, `MetricsSink`, `Clock`.
-- Dependencies to invert or decouple: Let planner/perception own telemetry ports; move concrete file writers into an adapter component. Extract evaluation functions over plain observations. Move Optuna plus launch/config knowledge to an outer experiment composition root.
+- Dependencies to invert or decouple: Let planner/auv_stereo_depth own telemetry ports; move concrete file writers into an adapter component. Extract evaluation functions over plain observations. Move Optuna plus launch/config knowledge to an outer experiment composition root.
 
 ## Current Internal Package Diagram
 
@@ -36,8 +36,8 @@ Solid arrows are calls, construction, field ownership or source dependencies as 
 graph LR
  OPT[optuna_optimizer.objective] --> YAML[write_params_yaml]
  OPT --> PROC[subprocess / signals / file polling]
- YAML --> BR[bringup config schema]
- PROC --> LAUNCH[bringup mapper.launch.py]
+ YAML --> BR[auv_bringup config schema]
+ PROC --> LAUNCH[auv_bringup mapper.launch.py]
  OPT --> EV[evaluate_map_accuracy]
  EV --> MAP[OctoMap / Open3D / GT files / viewer]
  RUN[BenchmarkLogger: callbacks / metrics / shutdown] --> LOG[MidrunLogger]
@@ -87,35 +87,35 @@ Actor labels are inferred responsibilities, not verified organizational roles. S
 
 | File | Current defined classes / top-level functions | Ideal placement / diagnostic disposition |
 |---|---|---|
-| `benchmark_evaluator/benchmark_evaluator/__init__.py` | No classes/top-level Python functions | Empty package marker; no executable policy or class interaction to partition. |
-| `benchmark_evaluator/benchmark_evaluator/benchmark_evaluator.py` | `evaluate_map_accuracy:7` | Evaluation use case and pure metrics; map/GT loaders and viewer become adapters. |
-| `benchmark_evaluator/benchmark_evaluator/midrun_logger.py` | `MidrunLogger:10`; `generate_results_plot:150`; `default_run_id:269` | Concrete role-specific file sinks and a separate plot adapter; client-owned abstract event contracts. |
-| `benchmark_evaluator/benchmark_evaluator/optuna_optimizer.py` | `write_params_yaml:18`; `objective:38` | Outer experiment composition plus RunTrial use case using TrialRunner/ResultStore ports. |
-| `benchmark_evaluator/benchmark_evaluator/plot_results.py` | `main:6` | CLI composition adapter; delegating to plot output is appropriate. |
-| `benchmark_evaluator/benchmark_evaluator/run_baselines.py` | `BenchmarkLogger:12`; `main:363` | ROS observation adapter, trajectory metric use case and report adapters. |
-| `benchmark_evaluator/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `benchmark_evaluator/setup.cfg` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `benchmark_evaluator/setup.py` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `benchmark_evaluator/test/test_copyright.py` | `test_copyright:23` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
-| `benchmark_evaluator/test/test_flake8.py` | `test_flake8:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
-| `benchmark_evaluator/test/test_pep257.py` | `test_pep257:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_benchmark/auv_benchmark/__init__.py` | No classes/top-level Python functions | Empty package marker; no executable policy or class interaction to partition. |
+| `auv_benchmark/auv_benchmark/auv_benchmark.py` | `evaluate_map_accuracy:7` | Evaluation use case and pure metrics; map/GT loaders and viewer become adapters. |
+| `auv_benchmark/auv_benchmark/midrun_logger.py` | `MidrunLogger:10`; `generate_results_plot:150`; `default_run_id:269` | Concrete role-specific file sinks and a separate plot adapter; client-owned abstract event contracts. |
+| `auv_benchmark/auv_benchmark/optuna_optimizer.py` | `write_params_yaml:18`; `objective:38` | Outer experiment composition plus RunTrial use case using TrialRunner/ResultStore ports. |
+| `auv_benchmark/auv_benchmark/plot_results.py` | `main:6` | CLI composition adapter; delegating to plot output is appropriate. |
+| `auv_benchmark/auv_benchmark/run_baselines.py` | `BenchmarkLogger:12`; `main:363` | ROS observation adapter, trajectory metric use case and report adapters. |
+| `auv_benchmark/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_benchmark/setup.cfg` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_benchmark/setup.py` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_benchmark/test/test_copyright.py` | `test_copyright:23` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_benchmark/test/test_flake8.py` | `test_flake8:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
+| `auv_benchmark/test/test_pep257.py` | `test_pep257:21` | Test-only consumer; excluded from production metrics. Static review only; no test execution claimed. |
 
 ## Class Counting Evidence
 
-- `benchmark_evaluator/benchmark_evaluator/midrun_logger.py`: `MidrunLogger` (line 10).
-- `benchmark_evaluator/benchmark_evaluator/run_baselines.py`: `BenchmarkLogger` (line 12).
+- `auv_benchmark/auv_benchmark/midrun_logger.py`: `MidrunLogger` (line 10).
+- `auv_benchmark/auv_benchmark/run_baselines.py`: `BenchmarkLogger` (line 12).
 
 ## Function and Class Interaction Detail
 
 The following module diagrams are static Python AST call/name and class-containment maps. Dotted edges indicate containment, solid edges an explicit local call. Repeated method names are resolved within the containing class; nested functions belong to their lexical owner. Dynamic dispatch, callbacks registered for later execution and arbitrary imported calls are not inferred as exact call edges. Package diagrams above supply the cross-module and C++ relationships. See [source coverage](../source_coverage.md) for all imports, C++ includes and function symbols.
 
-### `benchmark_evaluator/__init__.py`
+### `auv_benchmark/__init__.py`
 
 Ideal placement: Empty package marker; no executable policy or class interaction to partition.
 
 No executable local symbol interaction (empty marker or import/registry facade).
 
-### `benchmark_evaluator/benchmark_evaluator.py`
+### `auv_benchmark/auv_benchmark.py`
 
 Ideal placement: Evaluation use case and pure metrics; map/GT loaders and viewer become adapters.
 
@@ -124,7 +124,7 @@ graph LR
  s0["evaluate_map_accuracy : 7"]
 ```
 
-### `benchmark_evaluator/midrun_logger.py`
+### `auv_benchmark/midrun_logger.py`
 
 Ideal placement: Concrete role-specific file sinks and a separate plot adapter; client-owned abstract event contracts.
 
@@ -158,7 +158,7 @@ graph LR
  s9 --> s5
 ```
 
-### `benchmark_evaluator/optuna_optimizer.py`
+### `auv_benchmark/optuna_optimizer.py`
 
 Ideal placement: Outer experiment composition plus RunTrial use case using TrialRunner/ResultStore ports.
 
@@ -169,7 +169,7 @@ graph LR
  s1 --> s0
 ```
 
-### `benchmark_evaluator/plot_results.py`
+### `auv_benchmark/plot_results.py`
 
 Ideal placement: CLI composition adapter; delegating to plot output is appropriate.
 
@@ -178,7 +178,7 @@ graph LR
  s0["main : 6"]
 ```
 
-### `benchmark_evaluator/run_baselines.py`
+### `auv_benchmark/run_baselines.py`
 
 Ideal placement: ROS observation adapter, trajectory metric use case and report adapters.
 

@@ -1,4 +1,4 @@
-# Package Architecture Audit: motion_control
+# Package Architecture Audit: auv_motion_control
 
 ## Current Metrics
 
@@ -15,12 +15,12 @@ Counts use the observed source/deployment graph, not ROS topic flow. See [Phase 
 ## Violations Found
 | ID | Rule Broken | File & Line / Symbol | Concrete Issue | Actor / Architectural Impact |
 |---|---|---|---|---|
-| <a id="v-01"></a>V-01 | SRP / DIP | `motion_control/src/waypoint_control_node.cpp:17` / `WaypointControlNode` | **Critical.** One ROS node owns sensor state, heading/waypoint policy, runtime parameter access, vehicle-specific eight-thruster mixing and command publication (lines 279, 323, 340, 369). | Guidance, vehicle hardware allocation and middleware actors share one class; controller tests cannot substitute output/mixing without reaching into node internals. |
-| <a id="v-02"></a>V-02 | OCP | `motion_control/src/waypoint_control_node.cpp:293` / `mode branches / parse_keys` | **Moderate.** Modes yaw_centerize/full_centerize and key-to-thruster branches at line 369 are hardcoded into the policy class. | Adding a control mode or vehicle layout requires modifying the shared controller; use a selected ControlLaw and platform mixer at the composition boundary. |
-| <a id="v-03"></a>V-03 | SRP / DIP | `motion_control/src/point_iterator.cpp:10` / `PathPlanner` | **Moderate.** Queue progression, initial mission state and waypoint completion are hosted directly inside a ROS Node with transport arrays and timers. | Mission queue behavior and transport changes share one object; a pure queue state machine cannot currently be called independently. |
-| <a id="v-04"></a>V-04 | CCP / DIP | `motion_control/src/point_iterator.cpp:53` / `pointSegment_callback wire format` | **Moderate.** Trajectory input uses Float32MultiArray and an implicit four-value waypoint convention, mirrored in python_planner/planner_node.py:_publish_trajectory and controller input. | Trajectory schema changes require coordinated planner/control edits without a shared domain value contract; this is protocol coupling, not an additional source import edge. |
-| <a id="v-05"></a>V-05 | CRP / DIP | `motion_control/src/PathPlanning.py:11` / `legacy PathPlanner imports` | **Low.** Unbuilt legacy Python source mutates sys.path to an absolute repository path and imports Tools.explore2D, Tools.mapping2D and routeCalculation outside this component. | Reusing the dormant planner requires repository layout and unrelated helper dependencies; separate or retire it only in a later authorized migration. |
-| <a id="v-06"></a>V-06 | REP (dependency metadata) | `motion_control/package.xml:10` / `dependency declarations` | **Moderate.** Manifest contains no dependencies for rclcpp and ROS messages used in the compiled nodes; CMake additionally finds and links nlohmann_json. | Build/release metadata does not describe the component actually installed. The unbuilt placeholder alone is not a SOLID violation. |
+| <a id="v-01"></a>V-01 | SRP / DIP | `auv_motion_control/src/waypoint_control_node.cpp:17` / `WaypointControlNode` | **Critical.** One ROS node owns sensor state, heading/waypoint policy, runtime parameter access, vehicle-specific eight-thruster mixing and command publication (lines 279, 323, 340, 369). | Guidance, vehicle hardware allocation and middleware actors share one class; controller tests cannot substitute output/mixing without reaching into node internals. |
+| <a id="v-02"></a>V-02 | OCP | `auv_motion_control/src/waypoint_control_node.cpp:293` / `mode branches / parse_keys` | **Moderate.** Modes yaw_centerize/full_centerize and key-to-thruster branches at line 369 are hardcoded into the policy class. | Adding a control mode or vehicle layout requires modifying the shared controller; use a selected ControlLaw and platform mixer at the composition boundary. |
+| <a id="v-03"></a>V-03 | SRP / DIP | `auv_motion_control/src/point_iterator.cpp:10` / `PathPlanner` | **Moderate.** Queue progression, initial mission state and waypoint completion are hosted directly inside a ROS Node with transport arrays and timers. | Mission queue behavior and transport changes share one object; a pure queue state machine cannot currently be called independently. |
+| <a id="v-04"></a>V-04 | CCP / DIP | `auv_motion_control/src/point_iterator.cpp:53` / `pointSegment_callback wire format` | **Moderate.** Trajectory input uses Float32MultiArray and an implicit four-value waypoint convention, mirrored in auv_planner_reference/planner_node.py:_publish_trajectory and controller input. | Trajectory schema changes require coordinated planner/control edits without a shared domain value contract; this is protocol coupling, not an additional source import edge. |
+| <a id="v-05"></a>V-05 | CRP / DIP | `auv_motion_control/src/PathPlanning.py:11` / `legacy PathPlanner imports` | **Low.** Unbuilt legacy Python source mutates sys.path to an absolute repository path and imports Tools.explore2D, Tools.mapping2D and routeCalculation outside this component. | Reusing the dormant planner requires repository layout and unrelated helper dependencies; separate or retire it only in a later authorized migration. |
+| <a id="v-06"></a>V-06 | REP (dependency metadata) | `auv_motion_control/package.xml:10` / `dependency declarations` | **Moderate.** Manifest contains no dependencies for rclcpp and ROS messages used in the compiled nodes; CMake additionally finds and links nlohmann_json. | Build/release metadata does not describe the component actually installed. The unbuilt placeholder alone is not a SOLID violation. |
 
 ## Proposed Structural Boundary
 - Interfaces to extract: `VehicleState`, `WaypointQueue`, `ControlLaw`, `ThrusterMixer`, `CommandSink`, `Clock`; split guidance decisions from platform allocation and ROS serialization.
@@ -85,20 +85,20 @@ Actor labels are inferred responsibilities, not verified organizational roles. S
 
 | File | Current defined classes / top-level functions | Ideal placement / diagnostic disposition |
 |---|---|---|
-| `motion_control/CMakeLists.txt` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `motion_control/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
-| `motion_control/src/PathPlanning.py` | `PathPlanner:61`; `boustrophedon_path_planning:29`; `main:192` | Legacy ROS entry adapter plus coverage/queue use cases; resolve explicit module ownership. |
-| `motion_control/src/math_pid_utils.hpp` | `PID:45` | Framework-free entity/control math; preserve useful separation. |
-| `motion_control/src/point_iterator.cpp` | `PathPlanner:10` | ROS adapter around a pure trajectory queue/state use case. |
-| `motion_control/src/trajectory_smoother.cpp` | No classes/top-level Python functions | Unbuilt placeholder: no substantive architecture to partition; no violation solely for placeholder status. |
-| `motion_control/src/waypoint_control_node.cpp` | `WaypointControlNode:17` | Split guidance use case, ROS adapter and platform thruster mixer. |
+| `auv_motion_control/CMakeLists.txt` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_motion_control/package.xml` | No classes/top-level Python functions | Release/build metadata; reconcile dependencies with source. No domain policy extraction. |
+| `auv_motion_control/src/PathPlanning.py` | `PathPlanner:61`; `boustrophedon_path_planning:29`; `main:192` | Legacy ROS entry adapter plus coverage/queue use cases; resolve explicit module ownership. |
+| `auv_motion_control/src/math_pid_utils.hpp` | `PID:45` | Framework-free entity/control math; preserve useful separation. |
+| `auv_motion_control/src/point_iterator.cpp` | `PathPlanner:10` | ROS adapter around a pure trajectory queue/state use case. |
+| `auv_motion_control/src/trajectory_smoother.cpp` | No classes/top-level Python functions | Unbuilt placeholder: no substantive architecture to partition; no violation solely for placeholder status. |
+| `auv_motion_control/src/waypoint_control_node.cpp` | `WaypointControlNode:17` | Split guidance use case, ROS adapter and platform thruster mixer. |
 
 ## Class Counting Evidence
 
-- `motion_control/src/PathPlanning.py`: `PathPlanner` (line 61).
-- `motion_control/src/math_pid_utils.hpp`: `PID` (line 45).
-- `motion_control/src/point_iterator.cpp`: `PathPlanner` (line 10).
-- `motion_control/src/waypoint_control_node.cpp`: `WaypointControlNode` (line 17).
+- `auv_motion_control/src/PathPlanning.py`: `PathPlanner` (line 61).
+- `auv_motion_control/src/math_pid_utils.hpp`: `PID` (line 45).
+- `auv_motion_control/src/point_iterator.cpp`: `PathPlanner` (line 10).
+- `auv_motion_control/src/waypoint_control_node.cpp`: `WaypointControlNode` (line 17).
 
 ## Function and Class Interaction Detail
 

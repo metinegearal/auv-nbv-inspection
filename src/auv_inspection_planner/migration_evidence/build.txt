@@ -1,0 +1,38 @@
+Starting >>> active_inspection_planner
+--- stderr: active_inspection_planner
+CMake Warning (dev) at /usr/lib/x86_64-linux-gnu/cmake/pcl/Modules/FindFLANN.cmake:45 (find_package):
+  Policy CMP0144 is not set: find_package uses upper-case <PACKAGENAME>_ROOT
+  variables.  Run "cmake --help-policy CMP0144" for policy details.  Use the
+  cmake_policy command to set the policy and suppress this warning.
+
+  CMake variable FLANN_ROOT is set to:
+
+    /usr
+
+  For compatibility, find_package is ignoring the variable, but code in a
+  .cmake module might still use it.
+Call Stack (most recent call first):
+  /usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:261 (find_package)
+  /usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:306 (find_flann)
+  /usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:570 (find_external_library)
+  CMakeLists.txt:12 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Deprecation Warning at /tmp/planner-numerics/open3d-devel-linux-x86_64-cxx11-abi-0.19.0/lib/cmake/Open3D/Open3DConfig.cmake:18 (cmake_policy):
+  The OLD behavior for policy CMP0072 will be removed from a future version
+  of CMake.
+
+  The cmake-policies(7) manual explains that the OLD behaviors of all
+  policies are deprecated and that a policy should be set to OLD only under
+  specific short-term circumstances.  Projects should be ported to the NEW
+  behavior and not rely on setting a policy to OLD.
+Call Stack (most recent call first):
+  CMakeLists.txt:21 (find_package)
+
+
+---
+Finished <<< active_inspection_planner [26.2s]
+Could not connect: Operation not permitted
+
+Summary: 1 package finished [26.5s]
+  1 package had stderr output: active_inspection_planner
